@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionFromCookies, type OidcSession } from "./session";
 import { buildPublicUrl, normalizeUrlLike } from "./url-helpers";
+import { parseJwtPayload } from "./_internal.js";
 
 export type EdgeAuthProvider = "anonymous" | "cookie" | "pomerium";
 
@@ -22,22 +23,6 @@ function firstHeader(headerStore: Headers, names: string[]) {
     if (value) return value;
   }
   return undefined;
-}
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-  return Buffer.from(padded, "base64").toString("utf8");
-}
-
-function parseJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return null;
-    return JSON.parse(decodeBase64Url(payload)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 function stringClaim(claims: Record<string, unknown>, keys: string[]) {

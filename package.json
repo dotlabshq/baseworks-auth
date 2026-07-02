@@ -12,7 +12,8 @@
     "./session": "./dist/session.js",
     "./url-helpers": "./dist/url-helpers.js",
     "./edge": "./dist/edge.js",
-    "./zitadel": "./dist/zitadel.js"
+    "./jwt": "./dist/jwt.js",
+    "./hono": "./dist/hono.js"
   },
   "files": [
     "dist",
@@ -23,20 +24,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@baseworks/core": "^0.2.0",
+    "@baseworks/core": "workspace:*",
     "jose": "^6.2.3"
   },
   "peerDependencies": {
+    "hono": ">=4.0.0",
     "next": ">=15.0.0"
   },
   "peerDependenciesMeta": {
     "next": {
+      "optional": true
+    },
+    "hono": {
       "optional": true
     }
   },
   "devDependencies": {
     "@baseworks/tsconfig": "workspace:*",
     "@types/node": "^26.0.1",
+    "hono": "^4.12.27",
     "tsup": "^8.5.1",
     "typescript": "^5.6.0"
   }

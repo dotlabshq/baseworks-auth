@@ -4,7 +4,9 @@
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { base64urlEncode, base64urlDecodeString } from "@baseworks/core";
 import { getAuthPublicUrl, normalizeUrlLike } from "./url-helpers";
+import { generatePkce } from "./pkce.js";
 
 type DiscoveryDocument = {
   authorization_endpoint: string;
@@ -117,33 +119,8 @@ function resolvePublicRedirect(target: string, request: NextRequest) {
   return new URL(target, request.url);
 }
 
-function base64UrlEncode(input: ArrayBuffer | Uint8Array | string) {
-  const buffer =
-    typeof input === "string"
-      ? Buffer.from(input, "utf8")
-      : Buffer.from(input instanceof Uint8Array ? input : new Uint8Array(input));
-  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlDecode(input: string) {
-  const padded = input.replace(/-/g, "+").replace(/_/g, "/");
-  const remainder = padded.length % 4;
-  const normalized = remainder === 0 ? padded : `${padded}${"=".repeat(4 - remainder)}`;
-  return Buffer.from(normalized, "base64").toString("utf8");
-}
-
-function sha256(input: string) {
-  return crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-}
-
 function randomString() {
-  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
-}
-
-async function createPkcePair() {
-  const verifier = randomString();
-  const challenge = base64UrlEncode(await sha256(verifier));
-  return { challenge, verifier };
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 async function discoverOidc() {
@@ -154,17 +131,17 @@ async function discoverOidc() {
 }
 
 function parseJwtPayload(token: string): JwtPayload {
-  const [, payload = ""] = token.split(".");
-  return JSON.parse(base64UrlDecode(payload)) as JwtPayload;
+  const part = token.split(".")[1] ?? "";
+  return JSON.parse(base64urlDecodeString(part)) as JwtPayload;
 }
 
 function encodeSessionCookie(session: OidcSession) {
-  return base64UrlEncode(JSON.stringify(session));
+  return base64urlEncode(new TextEncoder().encode(JSON.stringify(session)));
 }
 
 function parseSessionCookie(value: string): OidcSession | null {
   try {
-    const session = JSON.parse(base64UrlDecode(value)) as OidcSession;
+    const session = JSON.parse(base64urlDecodeString(value)) as OidcSession;
     return session.isAuthenticated ? session : null;
   } catch {
     return null;
@@ -172,12 +149,12 @@ function parseSessionCookie(value: string): OidcSession | null {
 }
 
 function encodeTransactionCookie(transaction: OidcTransaction) {
-  return base64UrlEncode(JSON.stringify(transaction));
+  return base64urlEncode(new TextEncoder().encode(JSON.stringify(transaction)));
 }
 
 function parseTransactionCookie(value: string): OidcTransaction | null {
   try {
-    const transaction = JSON.parse(base64UrlDecode(value)) as OidcTransaction;
+    const transaction = JSON.parse(base64urlDecodeString(value)) as OidcTransaction;
     if (!transaction.codeVerifier || !transaction.returnTo) return null;
     return transaction;
   } catch {
@@ -232,7 +209,7 @@ function appendClientAuthentication(
   clientSecret?: string,
 ) {
   if (clientSecret) {
-    const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const basic = btoa(`${clientId}:${clientSecret}`);
     headers.set("authorization", `Basic ${basic}`);
     return;
   }
@@ -347,7 +324,7 @@ function clearTransientCookies(response: NextResponse, request: NextRequest) {
 export async function buildAuthorizationRedirect(request: NextRequest) {
   const discovery = await discoverOidc();
   const clientId = getClientId();
-  const { challenge, verifier } = await createPkcePair();
+  const { challenge, verifier } = await generatePkce();
   const nonce = randomString();
   const state = randomString();
   const redirectUri = getRedirectUri(request);

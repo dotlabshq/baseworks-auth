@@ -17,6 +17,10 @@ export type { CliAuthStart, CliAuthResult, PollOptions } from './cli-auth';
 // Token utilities
 export { hashToken, looksLikeJwt, stripBearer } from './token';
 
+// HS256 JWT verification (Node.js)
+export { verifyHs256Jwt } from './jwt';
+export type { JwtClaims } from './jwt';
+
 // URL helpers (auth/account public URLs, login/logout URL builders)
 export {
   normalizeUrlLike,
@@ -34,6 +38,3 @@ export {
 // Use subpath imports: @baseworks/auth/session, @baseworks/auth/edge
 // This keeps the main index Worker-safe (no next/server dependency).
 
-// Legacy re-export — kept for backward compatibility, prefer verifyOidcToken
-export { verifyZitadelToken } from './zitadel';
-export type { ZitadelConfig, ZitadelIdentity, ZitadelClaims } from './zitadel';

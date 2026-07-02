@@ -11,10 +11,11 @@ export default defineConfig({
     session: 'src/session.ts',
     'url-helpers': 'src/url-helpers.ts',
     edge: 'src/edge.ts',
-    zitadel: 'src/zitadel.ts',
+    jwt: 'src/jwt.ts',
+    hono: 'src/hono.ts',
   },
   format: ['esm'],
   dts: true,
   clean: true,
-  external: ['@baseworks/core', 'next'],
+  external: ['@baseworks/core', 'next', 'hono'],
 })
