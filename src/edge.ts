@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionFromCookies, type OidcSession } from "./session";
 import { buildPublicUrl, normalizeUrlLike } from "./url-helpers";
-import { parseJwtPayload } from "./_internal.js";
+import { parseJwtPayload } from "./jwt.js";
 
 export type EdgeAuthProvider = "anonymous" | "cookie" | "pomerium";
 

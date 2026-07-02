@@ -1,4 +1,16 @@
 import { createHmac, timingSafeEqual } from 'crypto'
+import { base64urlDecodeString } from '@baseworks/core'
+
+/** Decode a JWT payload without signature verification. Returns null on malformed input. */
+export function parseJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = token.split('.')[1]
+    if (!part) return null
+    return JSON.parse(base64urlDecodeString(part)) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
 
 export interface JwtClaims {
   sub?:    string
@@ -8,6 +20,15 @@ export interface JwtClaims {
   role?:   string
   type?:   string
   [key: string]: unknown
+}
+
+/** Sign an HS256 JWT. Runtime: Node.js only. */
+export function signHs256Jwt(claims: JwtClaims, secret: string, expiresInSeconds = 86400): string {
+  const header  = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')
+  const now     = Math.floor(Date.now() / 1000)
+  const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + expiresInSeconds, ...claims })).toString('base64url')
+  const sig     = createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')
+  return `${header}.${payload}.${sig}`
 }
 
 /**

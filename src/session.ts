@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { base64urlEncode, base64urlDecodeString } from "@baseworks/core";
 import { getAuthPublicUrl, normalizeUrlLike } from "./url-helpers";
 import { generatePkce } from "./pkce.js";
+import { parseJwtPayload } from "./jwt.js";
 
 type DiscoveryDocument = {
   authorization_endpoint: string;
@@ -130,10 +131,6 @@ async function discoverOidc() {
   return (await response.json()) as DiscoveryDocument;
 }
 
-function parseJwtPayload(token: string): JwtPayload {
-  const part = token.split(".")[1] ?? "";
-  return JSON.parse(base64urlDecodeString(part)) as JwtPayload;
-}
 
 function encodeSessionCookie(session: OidcSession) {
   return base64urlEncode(new TextEncoder().encode(JSON.stringify(session)));
@@ -285,7 +282,7 @@ function sessionFromPayload(payload: JwtPayload): OidcSession {
 
 function applyTokenCookies(response: NextResponse, request: NextRequest, tokens: TokenResponse) {
   const options = getCookieOptions(request);
-  const payload = parseJwtPayload(tokens.id_token!);
+  const payload = (parseJwtPayload(tokens.id_token!) ?? {}) as JwtPayload;
   const expiresAt =
     payload.exp ??
     (tokens.expires_in ? Math.floor(Date.now() / 1_000) + tokens.expires_in : undefined);
@@ -388,7 +385,7 @@ export async function handleAuthorizationCallback(request: NextRequest) {
       redirectUri: getRedirectUri(request),
       tokenEndpoint: discovery.token_endpoint,
     });
-    const payload = parseJwtPayload(tokens.id_token!);
+    const payload = (parseJwtPayload(tokens.id_token!) ?? {}) as JwtPayload;
     if (savedNonce && payload.nonce && payload.nonce !== savedNonce) {
       throw new Error("OIDC nonce mismatch.");
     }
@@ -410,7 +407,7 @@ export async function getSessionFromCookies(): Promise<OidcSession> {
   const idToken = cookieStore.get(oidcCookies.idToken)?.value;
   if (idToken) {
     try {
-      return sessionFromPayload(parseJwtPayload(idToken));
+      return sessionFromPayload((parseJwtPayload(idToken) ?? {}) as JwtPayload);
     } catch {
       // fall through to compact session cookie
     }
@@ -467,7 +464,7 @@ export async function buildSessionResponse(_request?: NextRequest) {
       status: 401,
     });
   }
-  return NextResponse.json(sessionFromPayload({ ...parseJwtPayload(idToken), exp: expiresAt }));
+  return NextResponse.json(sessionFromPayload({ ...(parseJwtPayload(idToken) ?? {}), exp: expiresAt } as JwtPayload));
 }
 
 export async function buildTokenResponse(request: NextRequest) {
