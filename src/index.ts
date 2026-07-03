@@ -17,8 +17,8 @@ export type { CliAuthStart, CliAuthResult, PollOptions } from './cli-auth';
 // Token utilities
 export { hashToken, looksLikeJwt, stripBearer } from './token';
 
-// HS256 JWT verification (Node.js)
-export { verifyHs256Jwt } from './jwt';
+// HS256 JWT sign + verify (Node.js)
+export { signHs256Jwt, verifyHs256Jwt } from './jwt';
 export type { JwtClaims } from './jwt';
 
 // URL helpers (auth/account public URLs, login/logout URL builders)
