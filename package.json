@@ -8,6 +8,7 @@
     "./oidc-human": "./dist/oidc-human.js",
     "./pkce": "./dist/pkce.js",
     "./cli-auth": "./dist/cli-auth.js",
+    "./cli": "./dist/cli.js",
     "./token": "./dist/token.js",
     "./session": "./dist/session.js",
     "./url-helpers": "./dist/url-helpers.js",
@@ -40,8 +41,10 @@
     }
   },
   "devDependencies": {
+    "@baseworks/cli": "workspace:*",
     "@baseworks/tsconfig": "workspace:*",
     "@types/node": "^26.0.1",
+    "commander": "^15.0.0",
     "hono": "^4.12.27",
     "tsup": "^8.5.1",
     "typescript": "^5.6.0"

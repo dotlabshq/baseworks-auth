@@ -7,6 +7,7 @@ export default defineConfig({
     'oidc-human': 'src/oidc-human.ts',
     pkce: 'src/pkce.ts',
     'cli-auth': 'src/cli-auth.ts',
+    cli: 'src/cli.ts',
     token: 'src/token.ts',
     session: 'src/session.ts',
     'url-helpers': 'src/url-helpers.ts',
@@ -17,5 +18,5 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
-  external: ['@baseworks/core', 'next', 'hono'],
+  external: ['@baseworks/core', '@baseworks/cli', 'next', 'hono', 'commander'],
 })
