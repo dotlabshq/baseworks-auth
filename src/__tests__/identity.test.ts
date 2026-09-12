@@ -122,3 +122,59 @@ describe('HS256 migration mode', () => {
     expect(await verifier({ jwks: jwks(key), issuer: ISS, audience: AUD })(legacy)).toBeNull()
   })
 })
+
+describe('hono middleware', () => {
+  const secret = 'test-secret-32-chars-long-enough!'
+
+  async function run(env: Record<string, string | undefined>, token?: string) {
+    const { requireAuth, resetAuthVerifier } = await import('../hono.js')
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    resetAuthVerifier()
+
+    const { Hono } = await import('hono')
+    const app = new Hono()
+    app.use('*', requireAuth)
+    app.get('/', (c) => c.json(c.get('auth')))
+    return app.request('/', token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+  }
+
+  it('answers 500, not 401, when nothing is configured', async () => {
+    const res = await run({ AUTH_JWKS_URI: undefined, JWT_SECRET: undefined }, 'whatever')
+    expect(res.status).toBe(500)
+  })
+
+  it('rejects a missing header', async () => {
+    expect((await run({ JWT_SECRET: secret })).status).toBe(401)
+  })
+
+  it('accepts a legacy HS256 token and classifies the token type', async () => {
+    const { signHs256Jwt } = await import('../jwt.js')
+    const res = await run(
+      { AUTH_JWKS_URI: undefined, JWT_SECRET: secret },
+      signHs256Jwt({ sub: 'usr_1', type: 'service' }, secret, 60),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ userId: 'usr_1', tokenType: 'service' })
+  })
+
+  it('treats an unknown token type as a plain user token', async () => {
+    const { signHs256Jwt } = await import('../jwt.js')
+    const res = await run(
+      { AUTH_JWKS_URI: undefined, JWT_SECRET: secret },
+      signHs256Jwt({ sub: 'usr_1', type: 'something-new' }, secret, 60),
+    )
+    expect(await res.json()).toMatchObject({ tokenType: 'user' })
+  })
+
+  it('rejects a token signed with a different secret', async () => {
+    const { signHs256Jwt } = await import('../jwt.js')
+    const res = await run(
+      { AUTH_JWKS_URI: undefined, JWT_SECRET: secret },
+      signHs256Jwt({ sub: 'usr_1', type: 'human' }, 'a-completely-different-secret!!', 60),
+    )
+    expect(res.status).toBe(401)
+  })
+})
