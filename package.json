@@ -1,6 +1,6 @@
 {
   "name": "@baseworks/auth",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
@@ -26,7 +26,9 @@
   },
   "dependencies": {
     "@baseworks/core": "^0.2.1",
-    "jose": "^6.2.3"
+    "jose": "^6.2.3",
+    "commander": "^15.0.0",
+    "@baseworks/cli": "workspace:*"
   },
   "peerDependencies": {
     "hono": ">=4.0.0",
@@ -41,10 +43,8 @@
     }
   },
   "devDependencies": {
-    "@baseworks/cli": "workspace:*",
     "@baseworks/tsconfig": "workspace:*",
     "@types/node": "^26.0.1",
-    "commander": "^15.0.0",
     "hono": "^4.12.27",
     "tsup": "^8.5.1",
     "typescript": "^5.6.0"

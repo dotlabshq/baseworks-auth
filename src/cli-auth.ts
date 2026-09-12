@@ -20,7 +20,13 @@ export interface CliAuthResult {
 export interface PollOptions {
   /** ms between polls (default: 2000) */
   intervalMs?: number;
-  /** ms before giving up (default: 300_000 = 5 min) */
+  /**
+   * ms before giving up (default: 600_000 = 10 min).
+   *
+   * Prefer passing `start.expiresIn * 1000` so the CLI stops at the same moment
+   * the server drops the state; a shorter timeout reports a client-side
+   * giving-up while the link is in fact still good.
+   */
   timeoutMs?:  number;
 }
 
@@ -64,7 +70,7 @@ export async function pollCliAuth(
   opts:    PollOptions = {},
 ): Promise<CliAuthResult> {
   const intervalMs = opts.intervalMs ?? 2_000;
-  const timeoutMs  = opts.timeoutMs  ?? 300_000;
+  const timeoutMs  = opts.timeoutMs  ?? 600_000;
   const base       = apiBase.replace(/\/+$/, '');
   const deadline   = Date.now() + timeoutMs;
 
@@ -86,14 +92,17 @@ export async function pollCliAuth(
       return { token: data.token };
     }
 
+    // The server answers 'expired' both for a state whose TTL ran out and for
+    // one it never had; from here the two are the same thing — nobody approved
+    // in time.
     if (data.status === 'expired') {
-      throw new Error('Auth session expired — run login again');
+      throw new Error('the sign-in was not approved in time — run login again');
     }
 
     // status === "pending" → continue polling
   }
 
-  throw new Error('Auth timed out — run login again');
+  throw new Error('no approval received in time — run login again');
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
