@@ -178,3 +178,61 @@ describe('hono middleware', () => {
     expect(res.status).toBe(401)
   })
 })
+
+describe('remote JWKS — the production path', () => {
+  it('fetches the key set over HTTP and verifies a token against it', async () => {
+    const { createServer } = await import('node:http')
+    const { exportPKCS8, generateKeyPair } = await import('jose')
+
+    const { privateKey } = await generateKeyPair('ES256', { extractable: true })
+    const key = await loadSigningKey(await exportPKCS8(privateKey))
+
+    let served = 0
+    const server = createServer((_req, res) => {
+      served += 1
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(jwks(key)))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as { port: number }
+
+    try {
+      const verify = verifier({
+        jwksUri: `http://127.0.0.1:${port}/.well-known/jwks.json`,
+        issuer: ISS,
+        audience: AUD,
+      })
+
+      const token = await mint(key, { sub: 'usr_1', type: 'human' }, {
+        issuer: ISS, audience: AUD, expiresInSeconds: 60,
+      })
+
+      expect((await verify(token))?.sub).toBe('usr_1')
+      // Second call must come from cache: a fetch per request would put the
+      // auth service on the critical path of every request in the realm.
+      expect((await verify(token))?.sub).toBe('usr_1')
+      expect(served).toBe(1)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('returns null instead of throwing when the key set is unreachable', async () => {
+    const key = await loadSigningKey((await freshKey()).pkcs8)
+    const token = await mint(key, { sub: 'usr_1', type: 'human' }, {
+      issuer: ISS, audience: AUD, expiresInSeconds: 60,
+    })
+
+    let seen: unknown
+    // Port 1 is reserved and never listening.
+    const verify = verifier({
+      jwksUri: 'http://127.0.0.1:1/jwks.json',
+      issuer: ISS,
+      audience: AUD,
+      onError: (err) => { seen = err },
+    })
+
+    expect(await verify(token)).toBeNull()
+    expect(seen).toBeTruthy()
+  })
+})
