@@ -18,6 +18,7 @@ export interface JwtClaims {
   iat?:    number
   org_id?: string
   role?:   string
+  email?:  string
   type?:   string
   [key: string]: unknown
 }

@@ -5,6 +5,7 @@ export interface ServiceAuthUser {
   userId:    string
   orgId?:    string
   role?:     string
+  email?:    string
   tokenType: 'user' | 'service'
 }
 
@@ -34,6 +35,7 @@ export async function requireAuth(c: Context, next: Next) {
     userId:    String(claims['sub'] ?? ''),
     orgId:     claims['org_id'] as string | undefined,
     role:      claims['role'] as string | undefined,
+    email:     claims['email'] as string | undefined,
     tokenType: claims['type'] === 'service' ? 'service' : 'user',
   })
   return next()
