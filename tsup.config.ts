@@ -13,6 +13,7 @@ export default defineConfig({
     'url-helpers': 'src/url-helpers.ts',
     edge: 'src/edge.ts',
     jwt: 'src/jwt.ts',
+    identity: 'src/identity.ts',
     hono: 'src/hono.ts',
   },
   format: ['esm'],
