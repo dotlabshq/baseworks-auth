@@ -21,20 +21,6 @@ export { hashToken, looksLikeJwt, stripBearer } from './token';
 export { signHs256Jwt, verifyHs256Jwt } from './jwt';
 export type { JwtClaims } from './jwt';
 
-// URL helpers (auth/account public URLs, login/logout URL builders)
-export {
-  normalizeUrlLike,
-  getAuthPublicUrl,
-  getAccountPublicUrl,
-  getAppBasePath,
-  getPublicSiteUrl,
-  buildPublicUrl,
-  buildAuthLoginUrl,
-  buildAuthLogoutUrl,
-  buildAccountProfileUrl,
-} from './url-helpers';
-
-// Next.js session + edge exports are intentionally NOT re-exported here.
-// Use subpath imports: @baseworks/auth/session, @baseworks/auth/edge
-// This keeps the main index Worker-safe (no next/server dependency).
-
+// Browser sessions are not here. Signing a person in, and keeping them signed
+// in, is auth-service's job: this package is what a consumer shares, not a
+// second place to run a login.

@@ -213,12 +213,13 @@ Each step is safe on its own; the power actually goes away at step 5.
 | `@baseworks/auth/oidc-human` | Any | OIDC → user resolver factory |
 | `@baseworks/auth/pkce` | Any | PKCE generation, OIDC auth URL builder |
 | `@baseworks/auth/token` | Any | `hashToken`, `looksLikeJwt`, `stripBearer` |
-| `@baseworks/auth/session` | Next.js server | Cookie session, exchange, refresh |
-| `@baseworks/auth/edge` | Next.js edge | Pomerium assertions, cookie fallback |
-| `@baseworks/auth/url-helpers` | Next.js | Auth/account URL builders |
 
-`hono` and `next` are optional peer dependencies: only the subpath that needs one
-pulls it in.
+`hono` is an optional peer dependency: only `@baseworks/auth/hono` pulls it in.
+
+There is no browser-session subpath. Up to 0.3 the package carried a Next.js
+sign-in (`session`, `edge`, `url-helpers`); it trusted an unsigned cookie and an
+unverified id_token, and nothing used it. Signing a person in is auth-service's
+job — an app sends the browser to `/v1/auth/login` and reads `/v1/auth/session`.
 
 ## Known gaps
 
@@ -356,71 +357,12 @@ const { token } = await pollCliAuth('https://api.flect.run', state)
 
 ---
 
-### `session.ts` → `@baseworks/auth/session`
-**Runtime:** Next.js (Server Components, Route Handlers) — dep: `next`
-
-Full OIDC PKCE session management for Next.js. Handles cookie set/clear, authorization code exchange, and token refresh. Uses `@baseworks/core` for base64url encoding and `pkce.ts` for PKCE generation.
-
-```ts
-import {
-  buildAuthorizationRedirect,
-  handleAuthorizationCallback,
-  getSessionFromCookies,
-  getServerAccessToken,
-  buildLogoutResponse,
-} from '@baseworks/auth/session'
-```
-
-Reads env vars: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (optional).
-
----
-
-### `edge.ts` → `@baseworks/auth/edge`
-**Runtime:** Next.js (Middleware, Server Components) — dep: `next`
-
-Reads the session from two sources in priority order: **Pomerium JWT assertion headers** (`x-pomerium-jwt-assertion`) first, then **OIDC cookie** fallback. Returns an `EdgeSession`.
-
-```ts
-import { getEdgeSession } from '@baseworks/auth/edge'
-
-const session = await getEdgeSession()
-// session.provider: 'pomerium' | 'cookie' | 'anonymous'
-```
-
----
-
-### `url-helpers.ts` → `@baseworks/auth/url-helpers`
-**Runtime:** Next.js — dep: none
-
-Reads Next.js env vars and exposes URL builder functions.
-
-```ts
-import { buildAuthLoginUrl, buildAuthLogoutUrl } from '@baseworks/auth/url-helpers'
-
-const loginUrl  = buildAuthLoginUrl('/dashboard')
-const logoutUrl = buildAuthLogoutUrl('/')
-```
-
-Env vars read: `NEXT_PUBLIC_AUTH_URL`, `NEXT_PUBLIC_ACCOUNT_URL`, `APP_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`.
-
----
-
-### `_internal.ts` — not exported
-Shared internal helpers. Not part of the public API.
-
-- `parseJwtPayload(token)` — splits a JWT and decodes the payload using `@baseworks/core/codec`. Used by `session.ts` and `edge.ts`.
-
----
-
 ## Internal Dependencies
 
 ```
 @baseworks/core/codec
   └── base64urlEncode / base64urlDecodeString
-        ├── pkce.ts        (PKCE verifier/challenge generation)
-        ├── session.ts     (cookie encode/decode)
-        └── _internal.ts  (parseJwtPayload)
-                └── edge.ts
+        └── pkce.ts        (PKCE verifier/challenge generation)
 ```
 
 ## When to Use What
@@ -447,11 +389,8 @@ OIDC token + DB user sync in one step
 API key hashing / Bearer header parsing
   └─ @baseworks/auth/token        →  hashToken / stripBearer
 
-Next.js OIDC login / callback / logout
-  └─ @baseworks/auth/session      →  buildAuthorizationRedirect / handleAuthorizationCallback
-
-Who is this user in Next.js Middleware?
-  └─ @baseworks/auth/edge         →  getEdgeSession
+Sign a person in from a web app
+  └─ not this package             →  redirect to auth-service /v1/auth/login
 
 CLI browser auth
   └─ @baseworks/auth/cli          →  login / logout / auth status commands

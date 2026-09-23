@@ -1,6 +1,6 @@
 {
   "name": "@baseworks/auth",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
@@ -10,9 +10,6 @@
     "./cli-auth": "./dist/cli-auth.js",
     "./cli": "./dist/cli.js",
     "./token": "./dist/token.js",
-    "./session": "./dist/session.js",
-    "./url-helpers": "./dist/url-helpers.js",
-    "./edge": "./dist/edge.js",
     "./jwt": "./dist/jwt.js",
     "./identity": "./dist/identity.js",
     "./hono": "./dist/hono.js"
@@ -33,13 +30,9 @@
     "@baseworks/cli": "workspace:*"
   },
   "peerDependencies": {
-    "hono": ">=4.0.0",
-    "next": ">=15.0.0"
+    "hono": ">=4.0.0"
   },
   "peerDependenciesMeta": {
-    "next": {
-      "optional": true
-    },
     "hono": {
       "optional": true
     }
