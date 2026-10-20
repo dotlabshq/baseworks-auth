@@ -1,6 +1,6 @@
 {
   "name": "@baseworks/auth",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
@@ -25,9 +25,9 @@
   },
   "dependencies": {
     "@baseworks/core": "^0.2.1",
+    "@baseworks/cli":  "^0.2.1",
     "jose": "^6.2.3",
-    "commander": "^15.0.0",
-    "@baseworks/cli": "workspace:*"
+    "commander": "^15.0.0"    
   },
   "peerDependencies": {
     "hono": ">=4.0.0"
