@@ -114,6 +114,25 @@ describe('HS256 migration mode', () => {
     expect((await verify(legacy))?.sub).toBe('usr_2')
   })
 
+  it('rejects a token that never expires, or names nobody, however it is signed', async () => {
+    const { createHmac } = await import('crypto')
+    const key = await loadSigningKey((await freshKey()).pkcs8)
+    const verify = verifier({ jwks: jwks(key), issuer: ISS, audience: AUD, legacyHs256Secret: secret })
+
+    // A holder of the shared secret can sign anything; the verifier must still
+    // insist on the claims every real token carries.
+    const hs = (payload: Record<string, unknown>) => {
+      const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+      const head = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(payload)}`
+      return `${head}.${createHmac('sha256', secret).update(head).digest('base64url')}`
+    }
+    const now = Math.floor(Date.now() / 1000)
+    expect(await verify(hs({ sub: 'usr_x', type: 'human', iat: now }))).toBeNull()          // no exp
+    expect(await verify(hs({ type: 'human', iat: now, exp: now + 60 }))).toBeNull()          // no sub
+    expect(await verify(hs({ sub: 'usr_x', iat: now, exp: now + 60 }))).toBeNull()           // no type
+    expect((await verify(hs({ sub: 'usr_x', type: 'human', iat: now, exp: now + 60 })))?.sub).toBe('usr_x')
+  })
+
   it('rejects a legacy token once the secret is withdrawn', async () => {
     const { signHs256Jwt } = await import('../jwt.js')
     const key = await loadSigningKey((await freshKey()).pkcs8)

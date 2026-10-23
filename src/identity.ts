@@ -188,9 +188,13 @@ export function verifier(opts: VerifierOptions & { onError?: (err: unknown) => v
     ? new TextEncoder().encode(opts.legacyHs256Secret)
     : undefined
 
+  // A token with no expiry is a token forever; one with no subject or type
+  // says nothing about who is calling. All three are minted every time, so
+  // their absence means the token was not minted here — however it was signed.
   const expectations = {
     ...(opts.issuer ? { issuer: opts.issuer } : {}),
     ...(opts.audience ? { audience: opts.audience } : {}),
+    requiredClaims: ['exp', 'sub', 'type'],
   }
 
   return async (token: string): Promise<IdentityClaims | null> => {
@@ -213,8 +217,9 @@ export function verifier(opts: VerifierOptions & { onError?: (err: unknown) => v
 
     if (!legacy) return null
     try {
-      // Legacy tokens predate iss/aud, so those are not required of them.
-      const { payload } = await jwtVerify(token, legacy, { algorithms: ['HS256'] })
+      // Legacy tokens predate iss/aud, so those are not required of them —
+      // but exp, sub and type are, for the same reason as above.
+      const { payload } = await jwtVerify(token, legacy, { algorithms: ['HS256'], requiredClaims: ['exp', 'sub', 'type'] })
       return payload as unknown as IdentityClaims
     } catch (err) {
       opts.onError?.(err)
