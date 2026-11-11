@@ -24,7 +24,12 @@ import { parseJwtPayload } from './jwt.js'
 import { startCliAuth, pollCliAuth } from './cli-auth.js'
 
 export interface AuthCliDeps {
-  /** Origin of the auth mount, e.g. `http://127.0.0.1:3003` (no `/v1/auth`). */
+  /**
+   * The origin the realm is published on, e.g. `http://localhost:8080` (no
+   * `/v1/auth`: the device flow appends `/v1/auth/start` itself). This is the
+   * gateway, not auth-service's own port — from auth-service 2.0 the service
+   * mounts its API under `/api` and only the gateway publishes `/v1/auth`.
+   */
   authBase: string | (() => string)
   cliName?: string
   /** Persist the identity token (app decides where). */

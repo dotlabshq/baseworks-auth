@@ -8,11 +8,17 @@
  * twice at once.
  *
  *   const token = serviceToken({
- *     authUrl: env.AUTH_URL,              // auth-service origin
+ *     authUrl: env.AUTH_URL,              // auth-service's API, see below
  *     clientId: 'flect-api',
  *     clientSecret: env.AUTH_CLIENT_SECRET, // from Vault, never in the job file
  *   })
  *   await fetch(iamUrl, { headers: { Authorization: `Bearer ${await token()}` } })
+ *
+ * `authUrl` is where auth-service's API is reached, and `/service-token` is
+ * appended to it. Through a gateway that is `https://<host>/v1/auth`. Calling
+ * auth-service directly, inside a cluster or on a laptop, it is the service's
+ * own API mount: `http://auth:3000/api` from auth-service 2.0 on, where the
+ * API moved under `/api` and the root serves pages (1.x: the bare origin).
  *
  * The secret is the service's, issued by the realm through
  * `AUTH_SERVICE_CLIENTS`. A token minted from it says `sub: <client id>,

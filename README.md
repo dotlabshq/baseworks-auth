@@ -219,7 +219,9 @@ Each step is safe on its own; the power actually goes away at step 5.
 There is no browser-session subpath. Up to 0.3 the package carried a Next.js
 sign-in (`session`, `edge`, `url-helpers`); it trusted an unsigned cookie and an
 unverified id_token, and nothing used it. Signing a person in is auth-service's
-job — an app sends the browser to `/v1/auth/login` and reads `/v1/auth/session`.
+job — an app sends the browser to auth-service's sign-in page, `/auth/login`
+(auth-service 2.0; `/v1/auth/login` on 1.x, still served through 2.x), and reads
+`/v1/auth/session`.
 
 ## Known gaps
 
@@ -390,7 +392,7 @@ API key hashing / Bearer header parsing
   └─ @baseworks/auth/token        →  hashToken / stripBearer
 
 Sign a person in from a web app
-  └─ not this package             →  redirect to auth-service /v1/auth/login
+  └─ not this package             →  redirect to auth-service /auth/login
 
 CLI browser auth
   └─ @baseworks/auth/cli          →  login / logout / auth status commands
