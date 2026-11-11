@@ -416,7 +416,7 @@ CLI browser auth
   └─ @baseworks/auth/cli-auth     →  startCliAuth / pollCliAuth (raw flow)
 ```
 
-## Who is acting (`@baseworks/auth/principal`, 2.1.1)
+## Who is acting (`@baseworks/auth/principal`, 2.2.0)
 
 Workspace ADR 0004. A verified token names one of four kinds of principal:
 `human`, `agent` (works for a person, never more than that person), `machine`
@@ -469,3 +469,29 @@ auth-service and iam follow.
 - **Every minted token must keep `type` beside `kind`.** The verifier rejects a
   token without `type` (and without `sub` or `exp`), so a token with only `kind`
   is a 401.
+
+### API tokens (`bwt_…`) are exchanged where they first arrive (2.2.0)
+
+A bearer that starts with `bwt_` is an API token (iam-service issues them). The
+realm keeps one kind of token inside, so `requireAuth` hands it to auth-service
+(`POST <AUTH_URL>/exchange-key`, where `AUTH_URL` is auth's API base, e.g.
+`http://127.0.0.1:3003/api`), gets a realm token that lives at most five
+minutes, and verifies that exactly like any other bearer. Afterwards:
+
+```ts
+c.get('principal')    // the agent, the machine or the person the API token stands for
+c.get('realmToken')   // the JWT the request was authenticated with: forward THIS, never the bwt_
+```
+
+- Without `AUTH_URL` an API token is a 401: it cannot be accepted here.
+- Kept in the process by `sha256(token)` until 30 seconds before the realm token
+  ends, at most 5 000 entries. A refusal (401 from auth) is kept 10 seconds. An
+  error (5xx, network, an answer without a token) is not kept and answers
+  `502 auth_unavailable`. Requests with one token at the same moment share one
+  call.
+- **The cost, said plainly:** a revoked API token keeps working for as long as a
+  realm token minted before the revocation lives (up to five minutes), and a
+  refused one is asked about again after 10 seconds. `AUTH_EXCHANGE_CACHE=off`
+  turns the memory off, for realms that want revocation at once.
+- The secret is only ever in the request body to auth. It is never logged or put
+  in an error. `resetAuthExchange()` clears the memory (tests).

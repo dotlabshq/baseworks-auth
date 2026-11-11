@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { Context, Next } from 'hono'
 import { verifier, type IdentityClaims, type Verifier } from './identity.js'
 import {
@@ -28,6 +29,12 @@ declare module 'hono' {
     requestId: string
     /** The surface the request came through (`X-Baseworks-Client`). */
     client: ClientInfo
+    /**
+     * The realm token this request was authenticated with: the bearer itself
+     * when it was a JWT, or what auth-service exchanged an API token (`bwt_…`)
+     * for. Forward this to other services, never the API token.
+     */
+    realmToken: string
   }
 }
 
@@ -84,6 +91,84 @@ function claimsToUser(claims: IdentityClaims): ServiceAuthUser {
   }
 }
 
+// ── API tokens (`bwt_…`), exchanged where they first arrive (ADR 0004 §7) ────
+
+type Exchanged =
+  | { status: 'ok'; token: string }
+  | { status: 'refused' }
+  | { status: 'unconfigured' }
+  | { status: 'error' }
+
+/** Kept until 30 seconds before the realm token ends; a refusal for 10 seconds. */
+const EXCHANGE_MARGIN_MS = 30_000
+const REFUSAL_MS = 10_000
+const EXCHANGE_MAX_ENTRIES = 5_000
+
+const exchanged = new Map<string, { result: Exchanged; until: number }>()
+const exchanging = new Map<string, Promise<Exchanged>>()
+
+/** Tests change the environment and the clock between cases. */
+export function resetAuthExchange(): void {
+  exchanged.clear()
+  exchanging.clear()
+}
+
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
+
+/**
+ * Ask auth-service (`AUTH_URL`, its API base, e.g. `http://127.0.0.1:3003/api`)
+ * for a realm token in place of an API token. The secret is never logged or put
+ * in an error: it is in the request body and nowhere else.
+ */
+async function callExchange(apiToken: string): Promise<{ result: Exchanged; ttlMs: number }> {
+  const base = (process.env['AUTH_URL'] ?? '').replace(/\/+$/, '')
+  if (!base) return { result: { status: 'unconfigured' }, ttlMs: 0 }
+  try {
+    const res = await fetch(`${base}/exchange-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: apiToken }),
+    })
+    if (res.status === 401) return { result: { status: 'refused' }, ttlMs: REFUSAL_MS }
+    if (!res.ok) {
+      console.error(`[auth] exchange answered ${res.status}`)
+      return { result: { status: 'error' }, ttlMs: 0 }
+    }
+    const body = (await res.json().catch(() => null)) as { token?: unknown; expires_in?: unknown } | null
+    if (typeof body?.token !== 'string' || !body.token) {
+      console.error('[auth] exchange answered without a token')
+      return { result: { status: 'error' }, ttlMs: 0 }
+    }
+    const seconds = typeof body.expires_in === 'number' && body.expires_in > 0 ? body.expires_in : 0
+    return { result: { status: 'ok', token: body.token }, ttlMs: seconds * 1000 - EXCHANGE_MARGIN_MS }
+  } catch (err) {
+    console.error(`[auth] exchange failed: ${(err as Error).name}`)
+    return { result: { status: 'error' }, ttlMs: 0 }
+  }
+}
+
+async function exchangeApiToken(apiToken: string): Promise<Exchanged> {
+  const key = sha256(apiToken)
+  const memory = process.env['AUTH_EXCHANGE_CACHE'] !== 'off'
+  if (memory) {
+    const hit = exchanged.get(key)
+    if (hit && hit.until > Date.now()) return hit.result
+    if (hit) exchanged.delete(key)
+  }
+  const running = exchanging.get(key)
+  if (running) return running
+  const run = (async () => {
+    const { result, ttlMs } = await callExchange(apiToken)
+    if (memory && ttlMs > 0) {
+      if (exchanged.size >= EXCHANGE_MAX_ENTRIES) exchanged.clear()
+      exchanged.set(key, { result, until: Date.now() + ttlMs })
+    }
+    return result
+  })().finally(() => exchanging.delete(key))
+  exchanging.set(key, run)
+  return run
+}
+
 /** A request id somebody else minted is kept only if it looks like one. */
 const requestIdOf = (header: string | undefined): string =>
   header && /^[A-Za-z0-9._-]{8,128}$/.test(header) ? header : crypto.randomUUID()
@@ -120,12 +205,24 @@ export async function requireAuth(c: Context, next: Next) {
     return c.json({ error: 'auth is not configured' }, 500)
   }
 
-  const claims = await cachedVerifier(header.slice(7))
+  // An API token is exchanged for a realm token where it first arrives; from
+  // here on the request is authenticated by that JWT, exactly like any other.
+  let bearer = header.slice(7)
+  if (bearer.startsWith('bwt_')) {
+    const r = await exchangeApiToken(bearer)
+    // No AUTH_URL: an API token cannot be accepted here. A refusal is a 401.
+    if (r.status === 'unconfigured' || r.status === 'refused') return c.json({ error: 'Unauthorized' }, 401)
+    if (r.status === 'error') return c.json({ error: 'auth_unavailable' }, 502)
+    bearer = r.token
+  }
+
+  const claims = await cachedVerifier(bearer)
   if (!claims) return c.json({ error: 'Unauthorized' }, 401)
 
   const auth = claimsToUser(claims)
   c.set('auth', auth)
   c.set('principal', auth.principal)
+  c.set('realmToken', bearer)
   c.set('requestId', requestIdOf(c.req.header('X-Request-Id')))
   c.set('client', clientOf(c.req.header('X-Baseworks-Client')))
   return next()
