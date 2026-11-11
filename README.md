@@ -11,6 +11,23 @@ every service in it and by no other.
 npm i @baseworks/auth
 ```
 
+**2.x goes with auth-service 2.x.** The package's major follows the service's,
+so which pair belongs together is never a question. 2.0.0 itself changes no
+behaviour and no export: what moved is the service (pages at its root, the API
+under `/api`; published at `/auth` and `/v1/auth`), and the addresses this
+package is handed follow from that:
+
+- `serviceToken({ authUrl })` — through a gateway, `https://<host>/v1/auth` as
+  before; calling auth-service directly, `http://<auth>/api` (was the bare
+  origin).
+- `addAuthCommands({ authBase })` — the origin the realm is published on, as
+  before. Not auth-service's own port.
+- A web app sends a person to the sign-in page, `/auth/login`.
+
+Moving from 1.x is a deliberate step, not an automatic one: a `^1` range does
+not pick this up. Change the range when the realm you talk to runs
+auth-service 2. 1.x is kept on branch `1.x` for realms that do not yet.
+
 Subpath imports, so a Worker or a browser bundle never pulls in Node-only code.
 The task-oriented guide is below; a per-file reference follows it.
 
