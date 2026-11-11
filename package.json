@@ -1,6 +1,6 @@
 {
   "name": "@baseworks/auth",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
@@ -13,6 +13,7 @@
     "./jwt": "./dist/jwt.js",
     "./identity": "./dist/identity.js",
     "./hono": "./dist/hono.js",
+    "./principal": "./dist/principal.js",
     "./service-token": "./dist/service-token.js"
   },
   "files": [

@@ -12,6 +12,7 @@ export default defineConfig({
     jwt: 'src/jwt.ts',
     identity: 'src/identity.ts',
     hono: 'src/hono.ts',
+    principal: 'src/principal.ts',
     'service-token': 'src/service-token.ts',
   },
   format: ['esm'],

@@ -49,6 +49,16 @@ export interface IdentityClaims {
   /** Narrowed tokens carry the org they are scoped to; identity tokens do not. */
   org_id?: string
   scope?: string
+  /**
+   * Who is acting (workspace ADR 0004), on tokens minted since: read them
+   * with `principalOf` from `@baseworks/auth/principal`, not one by one.
+   */
+  kind?: 'human' | 'agent' | 'machine' | 'service'
+  via?: 'session' | 'token' | 'key' | 'oauth' | 'client'
+  actor?: string
+  on_behalf_of?: string
+  access?: Array<'read' | 'write'>
+  credential_id?: string
   [key: string]: unknown
 }
 

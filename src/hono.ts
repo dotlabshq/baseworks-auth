@@ -1,17 +1,33 @@
 import type { Context, Next } from 'hono'
 import { verifier, type IdentityClaims, type Verifier } from './identity.js'
+import {
+  clientOf, emitAs, principalOf, type AuditContext, type ClientInfo, type Principal,
+} from './principal.js'
 
 export interface ServiceAuthUser {
   userId:    string
   orgId?:    string
   role?:     string
   email?:    string
-  tokenType: 'user' | 'service' | 'assistant'
+  /**
+   * The older reading of who is calling. `assistant` is an agent, `machine` an
+   * organization key; neither is a person at a keyboard. New code reads
+   * `principal`.
+   */
+  tokenType: 'user' | 'service' | 'assistant' | 'machine'
+  /** Who is acting, as every service says it (workspace ADR 0004). */
+  principal: Principal
 }
 
 declare module 'hono' {
   interface ContextVariableMap {
     auth: ServiceAuthUser
+    /** Who is acting. Set by `requireAuth`, the same object as `auth.principal`. */
+    principal: Principal
+    /** One id for this request across the services it reaches (`X-Request-Id`, or minted here). */
+    requestId: string
+    /** The surface the request came through (`X-Baseworks-Client`). */
+    client: ClientInfo
   }
 }
 
@@ -52,17 +68,35 @@ export function resetAuthVerifier(): void {
 }
 
 function claimsToUser(claims: IdentityClaims): ServiceAuthUser {
-  const type = claims.type
+  const principal = principalOf(claims)
   return {
     userId:    String(claims.sub ?? ''),
     orgId:     claims['org_id'] as string | undefined,
     role:      claims['role'] as string | undefined,
     email:     claims['email'] as string | undefined,
-    // Anything unrecognised is treated as a user token: `service` and
-    // `assistant` open doors a plain user token must not, so they are named
-    // explicitly and everything else falls to the least privileged reading.
-    tokenType: type === 'service' ? 'service' : type === 'assistant' ? 'assistant' : 'user',
+    // Derived from the principal, so the two can never disagree. Only a
+    // service token opens a service's doors, and only a person is a `user`.
+    tokenType: principal.kind === 'service' ? 'service'
+      : principal.kind === 'human' ? 'user'
+      : principal.kind === 'machine' ? 'machine'
+      : 'assistant',
+    principal,
   }
+}
+
+/** A request id somebody else minted is kept only if it looks like one. */
+const requestIdOf = (header: string | undefined): string =>
+  header && /^[A-Za-z0-9._-]{8,128}$/.test(header) ? header : crypto.randomUUID()
+
+/**
+ * What to append an event with, for this request: the actor, the audit
+ * envelope and the request id (workspace ADR 0004 §6). `org_id` is the
+ * organization the request was resolved to, when the route has one.
+ *
+ *     await customers.emit(id, 0, 'CustomerCreated', payload, auditOf(c, { org_id }))
+ */
+export function auditOf(c: Context, ctx: Pick<AuditContext, 'org_id'> = {}) {
+  return emitAs(c.get('principal'), { ...ctx, client: c.get('client'), request_id: c.get('requestId') })
 }
 
 /**
@@ -89,6 +123,10 @@ export async function requireAuth(c: Context, next: Next) {
   const claims = await cachedVerifier(header.slice(7))
   if (!claims) return c.json({ error: 'Unauthorized' }, 401)
 
-  c.set('auth', claimsToUser(claims))
+  const auth = claimsToUser(claims)
+  c.set('auth', auth)
+  c.set('principal', auth.principal)
+  c.set('requestId', requestIdOf(c.req.header('X-Request-Id')))
+  c.set('client', clientOf(c.req.header('X-Baseworks-Client')))
   return next()
 }

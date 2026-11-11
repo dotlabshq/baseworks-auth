@@ -415,3 +415,38 @@ CLI browser auth
   └─ @baseworks/auth/cli          →  login / logout / auth status commands
   └─ @baseworks/auth/cli-auth     →  startCliAuth / pollCliAuth (raw flow)
 ```
+
+## Who is acting (`@baseworks/auth/principal`, 2.1.0)
+
+Workspace ADR 0004. A verified token names one of four kinds of principal:
+`human`, `agent` (works for a person, never more than that person), `machine`
+(an organization key) and `service`. `requireAuth` reads it once and sets it on
+the request:
+
+```ts
+const p = c.get('principal')      // also auth.principal
+p.kind          // 'human' | 'agent' | 'machine' | 'service'
+p.actor         // 'user:<id>' | 'agent:dev@basri' | 'machine:ci@acme' | 'service:billing'
+p.via           // 'session' | 'token' | 'key' | 'oauth' | 'client'
+p.on_behalf_of  // for an agent: 'user:<id>' of the person it works for
+isSession(p)    // true only for a person who signed in
+```
+
+An event is appended with `auditOf(c, { org_id })`: the actor, the request id
+as the correlation id, and `metadata.audit` with the same fields in every
+service (`kind`, `actor`, `actor_id`, `via`, `on_behalf_of`, `credential_id`,
+`client`, `org_id`, `request_id`). A service does not write an actor by hand.
+
+```ts
+await customers.emit(id, 0, 'CustomerCreated', payload, auditOf(c, { org_id }))
+```
+
+`X-Request-Id` is kept when it looks like one and minted otherwise;
+`X-Baseworks-Client: cli/bw` says which surface a request came through.
+
+Tokens minted before this say only `type`. They are read as what they were:
+`human` (and any type this package does not know) is a person who signed in,
+`service` is a service, and `assistant` is an agent for its person, so it is
+no longer mistaken for a session. `auth.tokenType` is kept and now derived
+from the principal; it gains `machine`. Nothing mints the new claims yet:
+auth-service and iam follow.
