@@ -54,10 +54,14 @@ const VIAS: readonly Via[] = ['session', 'token', 'key', 'oauth', 'client']
 
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined)
 
+/**
+ * Only an absent claim means "no limit". A claim that is there but says
+ * nothing usable (empty, junk, not an array) is a limit to nothing: `[]`.
+ */
 function accessOf(v: unknown): Access[] | undefined {
-  if (!Array.isArray(v)) return undefined
-  const out = v.filter((a): a is Access => a === 'read' || a === 'write')
-  return out.length ? [...new Set(out)] : undefined
+  if (v === undefined) return undefined
+  if (!Array.isArray(v)) return []
+  return [...new Set(v.filter((a): a is Access => a === 'read' || a === 'write'))]
 }
 
 /** What follows the kind in an actor string must not be able to forge another one. */
@@ -66,18 +70,24 @@ const safe = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, '_')
 /** The actor string for a principal whose token did not carry one. */
 export function actorFor(kind: PrincipalKind, id: string, owner?: string): string {
   switch (kind) {
-    case 'human': return `user:${id}`
-    case 'service': return `service:${id}`
+    case 'human': return `user:${safe(id)}`
+    case 'service': return `service:${safe(id)}`
     case 'agent': return `agent:${safe(id)}@${safe(owner ?? 'unknown')}`
     case 'machine': return `machine:${safe(id)}@${safe(owner ?? 'unknown')}`
   }
 }
 
-/** An actor claim is believed only if it says the kind the token says. */
+const ACTOR_RE = /^(agent|machine|service):[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$/
+const BEHALF_RE = /^user:[A-Za-z0-9._-]+$/
+
+/**
+ * An actor claim is believed only if it is exactly one actor of the kind the
+ * token says. Anything else is rebuilt from the token. A person's actor is
+ * never read from a claim.
+ */
 function actorClaim(claims: Record<string, unknown>, kind: PrincipalKind): string | undefined {
   const actor = text(claims['actor'])
-  const prefix = kind === 'human' ? 'user:' : `${kind}:`
-  return actor?.startsWith(prefix) ? actor : undefined
+  return actor && kind !== 'human' && ACTOR_RE.test(actor) && actor.startsWith(`${kind}:`) ? actor : undefined
 }
 
 /**
@@ -97,7 +107,9 @@ function actorClaim(claims: Record<string, unknown>, kind: PrincipalKind): strin
  * service.
  */
 export function principalOf(claims: Record<string, unknown>): Principal {
-  const sub = String(claims['sub'] ?? '')
+  // Never throws: a subject that is not a string or a number reads as empty.
+  const rawSub = claims['sub']
+  const sub = typeof rawSub === 'string' ? rawSub : typeof rawSub === 'number' ? String(rawSub) : ''
   const named = KINDS.find((k) => k === claims['kind'])
   const type = claims['type']
   const kind: PrincipalKind =
@@ -120,7 +132,7 @@ export function principalOf(claims: Record<string, unknown>): Principal {
     // A person's token is a session only when it says so, or says nothing in
     // the old format. A credential id means an API token stood behind it.
     const via: Via = givenVia === 'token' || givenVia === 'oauth' ? givenVia : credential_id ? 'token' : 'session'
-    return { kind, id: sub, actor: `user:${sub}`, via, ...narrowing }
+    return { kind, id: sub, actor: actorFor('human', sub), via, ...narrowing }
   }
   if (kind === 'machine') {
     const role = text(claims['role'])
@@ -132,14 +144,19 @@ export function principalOf(claims: Record<string, unknown>): Principal {
       ...narrowing,
     }
   }
-  // An agent. The old `assistant` token has no agent record: its subject is
-  // the person, so the person is both the id and who it acts for.
-  const on_behalf_of = text(claims['on_behalf_of']) ?? `user:${sub}`
+  // An agent. It acts for somebody, or it acts for nobody and can do nothing:
+  // `on_behalf_of` is kept only in the shape `user:<id>`. The old `assistant`
+  // token (no `kind`) has no agent record: its subject is the person, so the
+  // person is who it acts for when it says nothing better.
+  const claimed = text(claims['on_behalf_of'])
+  const given = claimed && BEHALF_RE.test(claimed) ? claimed : undefined
+  const legacy = named ? undefined : BEHALF_RE.test(`user:${sub}`) ? `user:${sub}` : undefined
+  const on_behalf_of = given ?? legacy
   return {
     kind: 'agent', id: sub,
-    actor: actorClaim(claims, 'agent') ?? actorFor('agent', named ? sub : 'assistant', on_behalf_of.replace(/^user:/, '')),
+    actor: actorClaim(claims, 'agent') ?? actorFor('agent', named ? sub : 'assistant', on_behalf_of?.replace(/^user:/, '')),
     via: givenVia === 'oauth' ? 'oauth' : 'token',
-    on_behalf_of,
+    ...(on_behalf_of ? { on_behalf_of } : {}),
     ...narrowing,
   }
 }
@@ -156,9 +173,14 @@ export function isSession(p: Principal): boolean {
   return p.kind === 'human' && p.via === 'session'
 }
 
-/** May this credential write? Absent `access` means it is not limited. */
+/** May this credential write? Absent `access` means it is not limited; an empty one means nothing. */
 export function mayWrite(p: Principal): boolean {
   return !p.access || p.access.includes('write')
+}
+
+/** May this credential read? Absent `access` means it is not limited. */
+export function mayRead(p: Principal): boolean {
+  return !p.access || p.access.includes('read')
 }
 
 /** Where a request came through. `app` is the product or tool, when it said. */
@@ -196,7 +218,7 @@ export interface AuditContext {
 }
 
 export function auditEnvelope(p: Principal, ctx: AuditContext = {}): AuditEnvelope {
-  const org_id = ctx.org_id ?? p.org_id
+  const org_id = ctx.org_id || p.org_id
   const client = ctx.client ? (ctx.client.app ? `${ctx.client.surface}/${ctx.client.app}` : ctx.client.surface) : undefined
   return {
     kind: p.kind,

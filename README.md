@@ -416,7 +416,7 @@ CLI browser auth
   └─ @baseworks/auth/cli-auth     →  startCliAuth / pollCliAuth (raw flow)
 ```
 
-## Who is acting (`@baseworks/auth/principal`, 2.1.0)
+## Who is acting (`@baseworks/auth/principal`, 2.1.1)
 
 Workspace ADR 0004. A verified token names one of four kinds of principal:
 `human`, `agent` (works for a person, never more than that person), `machine`
@@ -450,3 +450,22 @@ Tokens minted before this say only `type`. They are read as what they were:
 no longer mistaken for a session. `auth.tokenType` is kept and now derived
 from the principal; it gains `machine`. Nothing mints the new claims yet:
 auth-service and iam follow.
+
+### What is believed, and what is not
+
+- An `actor` claim is believed only if it is exactly one actor of the token's
+  kind (`^(agent|machine|service):[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$`);
+  otherwise it is rebuilt. A person's actor is always built here, and a `sub`
+  goes into an actor through the same sanitiser (`id` keeps the raw string).
+- `principalOf` never throws: a `sub` that is not a string or a number reads as
+  empty.
+- **`access` fails closed.** Only an absent claim means no limit. A claim that
+  is there but unusable (empty, junk, not an array) is `access: []`: `mayRead`
+  and `mayWrite` are both false.
+- An agent (`kind: agent`) carries `on_behalf_of` only as `user:<id>`. Without
+  it the principal has no `on_behalf_of`, `personOf` is `undefined`, and it can
+  do nothing: an agent with nobody behind it has no standing. Only the old
+  `assistant` token (no `kind`) defaults to `user:<sub>`.
+- **Every minted token must keep `type` beside `kind`.** The verifier rejects a
+  token without `type` (and without `sub` or `exp`), so a token with only `kind`
+  is a 401.

@@ -69,9 +69,9 @@ describe('older and odd tokens', () => {
     expect(actorFor('agent', 'dev@x agent:root', 'basri')).toBe('agent:dev_x_agent_root@basri')
   })
 
-  it('access that says nothing usable is no limit claimed, and junk is dropped', () => {
+  it('access that says nothing usable is a limit to nothing, and junk is dropped', () => {
     expect(principalOf({ sub: 'u1', kind: 'human', via: 'token', access: ['admin', 'read', 'read'] }).access).toEqual(['read'])
-    expect(principalOf({ sub: 'u1', kind: 'human', via: 'token', access: 'write' }).access).toBeUndefined()
+    expect(principalOf({ sub: 'u1', kind: 'human', via: 'token', access: 'write' }).access).toEqual([])
   })
 })
 

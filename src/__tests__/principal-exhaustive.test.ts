@@ -13,7 +13,7 @@ import { jwks, loadSigningKey, mint } from '../identity.js'
 import { signHs256Jwt } from '../jwt.js'
 import { auditOf, requireAuth, resetAuthVerifier } from '../hono.js'
 import {
-  actorFor, auditEnvelope, clientOf, emitAs, isSession, mayWrite, personOf, principalOf,
+  actorFor, auditEnvelope, clientOf, emitAs, isSession, mayRead, mayWrite, personOf, principalOf,
   type Principal, type PrincipalKind, type Via,
 } from '../principal.js'
 
@@ -67,22 +67,23 @@ describe('principalOf: kind', () => {
   })
 
   it.each([
-    [undefined, ''], [null, ''], [12, '12'], [0, '0'], [true, 'true'], ['', ''],
+    [undefined, ''], [null, ''], [12, '12'], [0, '0'], [true, ''], [false, ''], ['', ''],
   ])('sub %j becomes id %j', (sub, id) => {
     expect(principalOf({ sub, kind: 'human' }).id).toBe(id)
   })
 
-  it('a non-string sub is stringified (documented behaviour, not rejected)', () => {
-    expect(principalOf({ sub: { a: 1 }, kind: 'human' }).id).toBe('[object Object]')
-    expect(principalOf({ sub: ['a', 'b'], kind: 'human' }).id).toBe('a,b')
+  it('a sub that is not a string or a number reads as empty', () => {
+    expect(principalOf({ sub: { a: 1 }, kind: 'human' }).id).toBe('')
+    expect(principalOf({ sub: ['a', 'b'], kind: 'human' }).id).toBe('')
   })
 
-  // FINDING: `String(claims.sub)` throws for an object whose own `toString`
-  // is not a function, which a JSON claim can be (`{"sub":{"toString":1}}`).
-  // The token is signed, so only an issuer's bug gets here, but `requireAuth`
-  // would then answer 500 instead of 401.
-  it('FINDING: a sub that is an object with a non-callable toString makes principalOf throw', () => {
-    expect(() => principalOf({ sub: { toString: 'no' }, kind: 'human' })).toThrow(TypeError)
+  it('principalOf never throws, whatever sub is (an object with a non-callable toString included)', () => {
+    for (const sub of [{ toString: 'no' }, { toString: 1, valueOf: 2 }, Object.create(null), [Object.create(null)], Symbol.iterator, 10n]) {
+      for (const kind of ['human', 'agent', 'machine', 'service']) {
+        expect(() => principalOf({ sub, kind }), kind).not.toThrow()
+        expect(principalOf({ sub, kind }).id).toBe('')
+      }
+    }
   })
 
   it('the principal never carries keys with undefined values', () => {
@@ -165,9 +166,9 @@ describe('principalOf: actor claim', () => {
   })
 
   it.each([
-    ['agent', 'service:billing', 'agent:a1@a1'],
-    ['agent', 'machine:ci@acme', 'agent:a1@a1'],
-    ['agent', 'user:u1', 'agent:a1@a1'],
+    ['agent', 'service:billing', 'agent:a1@unknown'],
+    ['agent', 'machine:ci@acme', 'agent:a1@unknown'],
+    ['agent', 'user:u1', 'agent:a1@unknown'],
     ['machine', 'agent:dev@basri', 'machine:k1@unknown'],
     ['machine', 'user:u1', 'machine:k1@unknown'],
     ['service', 'machine:ci@acme', 'service:k1'],
@@ -180,13 +181,15 @@ describe('principalOf: actor claim', () => {
   it.each([
     ['', 'empty'], [null, 'null'], [undefined, 'undefined'], [5, 'number'], [{}, 'object'], [['agent:x@y'], 'array'],
   ])('a non-usable actor claim (%j, %s) is ignored', (actor, _label) => {
-    expect(principalOf({ sub: 'a1', kind: 'agent', actor }).actor).toBe('agent:a1@a1')
+    expect(principalOf({ sub: 'a1', kind: 'agent', actor }).actor).toBe('agent:a1@unknown')
     expect(principalOf({ sub: 'k1', kind: 'machine', actor, org_id: 'o1' }).actor).toBe('machine:k1@o1')
     expect(principalOf({ sub: 'svc', kind: 'service', actor }).actor).toBe('service:svc')
   })
 
-  it('the prefix alone is a valid claim (prefix check only)', () => {
-    expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'agent:' }).actor).toBe('agent:')
+  it('the prefix alone is not an actor: it is rebuilt', () => {
+    expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'agent:' }).actor).toBe('agent:a1@unknown')
+    expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'agent:@basri' }).actor).toBe('agent:a1@unknown')
+    expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'agent:dev@' }).actor).toBe('agent:a1@unknown')
   })
 
   it('the prefix is case sensitive and must be at the start', () => {
@@ -195,27 +198,31 @@ describe('principalOf: actor claim', () => {
     expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'x agent:dev@basri', on_behalf_of: 'user:u1' }).actor).toBe('agent:a1@u1')
   })
 
-  // FINDING: the claim is trusted for its prefix only. Anything after the
-  // prefix is believed, spaces and a second actor included. The token is
-  // signed by the realm, so this is not a forgery by a caller; but a consumer
-  // that splits an actor on whitespace, or one issuer's bug, would write a
-  // record that names two actors. `actorFor` sanitises names; `actorClaim` does not.
-  it('FINDING: a matching-prefix claim can carry spaces and a second actor', () => {
-    expect(principalOf({ sub: 'a1', kind: 'agent', actor: 'agent:x@y service:z' }).actor).toBe('agent:x@y service:z')
-    expect(principalOf({ sub: 'k1', kind: 'machine', actor: 'machine:ci@acme user:root' }).actor).toBe('machine:ci@acme user:root')
-    expect(principalOf({ sub: 'billing', kind: 'service', actor: 'service:billing\nuser:root' }).actor).toBe('service:billing\nuser:root')
+  it.each([
+    'agent:x@y service:z', 'agent:x@y\nuser:root', 'agent:x y@z', 'agent:x@y@z', 'agent:x@y/z', 'agent:x:y@z', 'agent:ü@z', 'agent:x@y ', 'agent: x@y',
+  ])('an agent actor claim that is not exactly one actor (%j) is rebuilt', (actor) => {
+    expect(principalOf({ sub: 'a1', kind: 'agent', actor, on_behalf_of: 'user:u1' }).actor).toBe('agent:a1@u1')
+  })
+  it('the same for machine and service claims', () => {
+    expect(principalOf({ sub: 'k1', kind: 'machine', org_id: 'o1', actor: 'machine:ci@acme user:root' }).actor).toBe('machine:k1@o1')
+    expect(principalOf({ sub: 'billing', kind: 'service', actor: 'service:billing\nuser:root' }).actor).toBe('service:billing')
+    expect(principalOf({ sub: 'billing', kind: 'service', actor: 'service:a@b' }).actor).toBe('service:a@b')
   })
 
-  // FINDING: ids that are not passed through `safe` end up inside the actor.
-  it('FINDING: a human or service `sub` with spaces is written into the actor unsanitised', () => {
-    expect(principalOf({ sub: 'u1 agent:x@y', kind: 'human' }).actor).toBe('user:u1 agent:x@y')
-    expect(principalOf({ sub: 'billing user:root', kind: 'service' }).actor).toBe('service:billing user:root')
-    expect(actorFor('human', 'a b')).toBe('user:a b')
-    expect(actorFor('service', 'a b')).toBe('service:a b')
+  it('a human or service `sub` goes into the actor sanitised; the id keeps the raw string', () => {
+    const h = principalOf({ sub: 'u1 agent:x@y', kind: 'human' })
+    expect(h.actor).toBe('user:u1_agent_x_y')
+    expect(h.id).toBe('u1 agent:x@y')
+    const sv = principalOf({ sub: 'billing user:root', kind: 'service' })
+    expect(sv.actor).toBe('service:billing_user_root')
+    expect(sv.id).toBe('billing user:root')
+    expect(actorFor('human', 'a b')).toBe('user:a_b')
+    expect(actorFor('service', 'a b')).toBe('service:a_b')
+    expect(principalOf({ sub: '01a191d6-ab.c_d', kind: 'human' }).actor).toBe('user:01a191d6-ab.c_d')
   })
 
   it('a derived agent or machine actor is sanitised even when sub is hostile', () => {
-    expect(principalOf({ sub: 'x y@z', kind: 'agent', on_behalf_of: 'user:o w' }).actor).toBe('agent:x_y_z@o_w')
+    expect(principalOf({ sub: 'x y@z', kind: 'agent', on_behalf_of: 'user:ow' }).actor).toBe('agent:x_y_z@ow')
     expect(principalOf({ sub: 'k y', kind: 'machine', org_id: 'o 1' }).actor).toBe('machine:k_y@o_1')
   })
 })
@@ -242,22 +249,28 @@ describe('principalOf: on_behalf_of', () => {
     expect(p.actor).toBe('agent:assistant@u2')
   })
 
-  it('a new agent (kind) with no on_behalf_of falls back to user:<sub> and names itself by sub', () => {
+  it('an agent that says kind and nobody behind it has nobody: no on_behalf_of, no person', () => {
     const p = principalOf({ sub: 'agt', kind: 'agent' })
-    expect(p.on_behalf_of).toBe('user:agt')
-    expect(p.actor).toBe('agent:agt@agt')
+    expect('on_behalf_of' in p).toBe(false)
+    expect(personOf(p)).toBeUndefined()
+    expect(p.actor).toBe('agent:agt@unknown')
   })
 
-  it('an empty on_behalf_of is as good as missing', () => {
-    expect(principalOf({ sub: 'agt', kind: 'agent', on_behalf_of: '' }).on_behalf_of).toBe('user:agt')
-    expect(principalOf({ sub: 'agt', kind: 'agent', on_behalf_of: 3 }).on_behalf_of).toBe('user:agt')
+  it.each(['', 3, null, 'org:o1', 'u1', 'user:', 'user:a b', 'user:a@b', 'user:u1 user:u2', 'user:u1\n', 'User:u1', ['user:u1']])(
+    'an on_behalf_of that is %j leaves a kind-agent token with nobody behind it',
+    (v) => {
+      const p = principalOf({ sub: 'agt', kind: 'agent', on_behalf_of: v })
+      expect('on_behalf_of' in p).toBe(false)
+      expect(personOf(p)).toBeUndefined()
+    },
+  )
+  it('a valid on_behalf_of is kept', () => {
+    expect(principalOf({ sub: 'agt', kind: 'agent', on_behalf_of: 'user:01a1.b_c-d' }).on_behalf_of).toBe('user:01a1.b_c-d')
   })
-
-  it('an on_behalf_of without the user: prefix is kept as given (FINDING: not validated)', () => {
-    // personOf then returns it as a person id verbatim.
-    const p = principalOf({ sub: 'agt', kind: 'agent', on_behalf_of: 'org:o1' })
-    expect(p.on_behalf_of).toBe('org:o1')
-    expect(personOf(p)).toBe('org:o1')
+  it('a legacy assistant with an invalid claim or an odd sub: the default only when it is a clean id', () => {
+    expect(principalOf({ sub: 'u1', type: 'assistant', on_behalf_of: 'garbage' }).on_behalf_of).toBe('user:u1')
+    expect('on_behalf_of' in principalOf({ sub: 'u 1', type: 'assistant' })).toBe(false)
+    expect('on_behalf_of' in principalOf({ type: 'assistant' })).toBe(false)
   })
 
   it.each(['human', 'machine', 'service'] as const)('is never present for %s, even when the claim is', (kind) => {
@@ -325,16 +338,23 @@ describe('principalOf: org_id, access, role, credential_id', () => {
     it('drops junk values', () => {
       expect(access(['admin', 'read', 3, null, 'READ', undefined, {}])).toEqual(['read'])
     })
-    it.each([
-      ['read'], ['write'], [{ 0: 'read' }], [null], [3], [true], [undefined],
-    ])('non-array %j is no access claim', (v) => {
-      expect(access(v)).toBeUndefined()
+    it.each([['read'], ['write'], [{ 0: 'read' }], [null], [3], [true], ['']])('a claim that is not an array (%j) is a limit to nothing', (v) => {
+      expect(access(v)).toEqual([])
     })
-    it('an empty array is no access claim (not "read nothing")', () => {
-      expect(access([])).toBeUndefined()
+    it('an absent claim is no limit', () => {
+      expect(access(undefined)).toBeUndefined()
+      expect('access' in principalOf({ sub: 'u', kind: 'human', via: 'token' })).toBe(false)
     })
-    it('an array of only junk is no access claim', () => {
-      expect(access(['admin', 'root'])).toBeUndefined()
+    it('an empty array is a limit to nothing', () => {
+      expect(access([])).toEqual([])
+    })
+    it('an array of only junk is a limit to nothing', () => {
+      expect(access(['admin', 'root'])).toEqual([])
+    })
+    it('applies to agents and machines too, and never to a service', () => {
+      expect(principalOf({ sub: 'a', kind: 'agent', access: [] }).access).toEqual([])
+      expect(principalOf({ sub: 'k', kind: 'machine', access: 'x' }).access).toEqual([])
+      expect('access' in principalOf({ sub: 's', kind: 'service', access: [] })).toBe(false)
     })
     it('a single value', () => {
       expect(access(['write'])).toEqual(['write'])
@@ -406,13 +426,19 @@ describe('isSession and mayWrite', () => {
     expect(mayWrite(p(['read', 'write']))).toBe(true)
   })
 
-  it('mayWrite follows from the claims: a junk-only access list does not lock a token out nor grant it', () => {
-    // Empty/junk access parses to "no limit" — pinned: a token whose access
-    // claim is unreadable is unlimited. FINDING-adjacent: fail-open on a
-    // malformed claim; issuers must always write a clean array.
-    expect(mayWrite(principalOf({ sub: 'u', kind: 'human', via: 'token', access: ['admin'] }))).toBe(true)
-    expect(mayWrite(principalOf({ sub: 'u', kind: 'human', via: 'token', access: [] }))).toBe(true)
-    expect(mayWrite(principalOf({ sub: 'u', kind: 'human', via: 'token', access: ['read'] }))).toBe(false)
+  it('fails closed: an unusable access claim is neither readable nor writable; only an absent one is unlimited', () => {
+    const p = (access?: unknown) => principalOf({ sub: 'u', kind: 'human', via: 'token', ...(access === undefined ? {} : { access }) })
+    for (const bad of [['admin'], [], 'write', null, 0]) {
+      expect(mayWrite(p(bad)), JSON.stringify(bad)).toBe(false)
+      expect(mayRead(p(bad)), JSON.stringify(bad)).toBe(false)
+    }
+    expect(mayWrite(p())).toBe(true)
+    expect(mayRead(p())).toBe(true)
+    expect(mayWrite(p(['read']))).toBe(false)
+    expect(mayRead(p(['read']))).toBe(true)
+    expect(mayRead(p(['write']))).toBe(false)
+    expect(mayWrite(p(['write']))).toBe(true)
+    expect(mayRead(p(['read', 'write']))).toBe(true)
   })
 })
 
@@ -518,11 +544,10 @@ describe('auditEnvelope and emitAs', () => {
     expect('role' in e).toBe(false)
   })
 
-  it('an empty request id or empty org id in the context counts as absent for request_id, not for org', () => {
+  it('an empty request id is absent; an empty org id falls back to the credential\'s org', () => {
     expect('request_id' in auditEnvelope(minimal, { request_id: '' })).toBe(false)
-    // org_id '' is not undefined, so `??` keeps it, and then the falsy check drops it: the
-    // credential's org is NOT used. Pinned: an explicit empty org hides the credential's.
-    expect('org_id' in auditEnvelope(full, { org_id: '' })).toBe(false)
+    expect(auditEnvelope(full, { org_id: '' }).org_id).toBe('pcred')
+    expect('org_id' in auditEnvelope(minimal, { org_id: '' })).toBe(false)
   })
 
   it('org fallback order: context, then credential, then none', () => {
@@ -936,12 +961,19 @@ describe('principalOf, a few hundred random claim objects', () => {
         expect(isSession(p)).toBe(false)
       }
       // A person's actor is always user:<id>, whatever the claim said.
-      if (p.kind === 'human') expect(p.actor).toBe(`user:${p.id}`)
+      if (p.kind === 'human') expect(p.actor).toBe(`user:${p.id.replace(/[^A-Za-z0-9._-]/g, '_')}`)
+      // Whatever the claims were, an actor is one actor: no spaces, one prefix.
+      expect(p.actor, JSON.stringify(c)).toMatch(/^(user|agent|machine|service):[A-Za-z0-9._-]*(@[A-Za-z0-9._-]+)?$/)
+      // access: only an absent claim is no limit (never for a service).
+      if (p.kind !== 'service') expect('access' in p).toBe(c['access'] !== undefined)
+      if (p.access && p.access.length === 0) { expect(mayWrite(p)).toBe(false); expect(mayRead(p)).toBe(false) }
       // The actor always starts with the prefix of the kind.
       const prefix = { human: 'user:', agent: 'agent:', machine: 'machine:', service: 'service:' }[p.kind]
       expect(p.actor.startsWith(prefix)).toBe(true)
       // An agent always has someone it works for; no one else does.
-      expect('on_behalf_of' in p).toBe(p.kind === 'agent')
+      if (p.kind !== 'agent') expect('on_behalf_of' in p).toBe(false)
+      else if (p.on_behalf_of) expect(p.on_behalf_of).toMatch(/^user:[A-Za-z0-9._-]+$/)
+      else expect(personOf(p)).toBeUndefined()
       // `role` only for a machine.
       if (p.kind !== 'machine') expect('role' in p).toBe(false)
       // A service is never narrowed.
