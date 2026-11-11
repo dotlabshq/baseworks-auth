@@ -495,3 +495,12 @@ c.get('realmToken')   // the JWT the request was authenticated with: forward THI
   turns the memory off, for realms that want revocation at once.
 - The secret is only ever in the request body to auth. It is never logged or put
   in an error. `resetAuthExchange()` clears the memory (tests).
+
+### Remembering an authorization answer: key it on the credential (2.2.1)
+
+A service that keeps what org-service said a caller may do must key it on
+`credentialKey(principal)` (from `@baseworks/auth/principal`), not on the user
+id: a session and a read-only token of the same person, or an agent of theirs,
+are decided differently, and an answer given to one must never be served to
+another. `requireAuth` also runs once per request however many routers register
+it.

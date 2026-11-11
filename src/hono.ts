@@ -194,6 +194,11 @@ export function auditOf(c: Context, ctx: Pick<AuditContext, 'org_id'> = {}) {
  * so it should be removed once the realm issues ES256 everywhere.
  */
 export async function requireAuth(c: Context, next: Next) {
+  // Authenticated already by an earlier `requireAuth` on this request (routers
+  // mounted on one path each register it): once is enough, and with the exchange
+  // memory off a second run would be a second exchange.
+  if (c.get('realmToken')) return next()
+
   const header = c.req.header('Authorization')
   if (!header?.startsWith('Bearer ')) return c.json({ error: 'Unauthorized' }, 401)
 

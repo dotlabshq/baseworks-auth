@@ -134,6 +134,24 @@ describe('exchanging', () => {
   })
 })
 
+describe('once per request', () => {
+  it('requireAuth registered several times on one request exchanges once, even with the memory off', async () => {
+    process.env['AUTH_EXCHANGE_CACHE'] = 'off'
+    const a = new Hono()
+    a.use('*', requireAuth); a.use('*', requireAuth); a.use('/who', requireAuth)
+    a.get('/who', (c) => c.json({ realmToken: c.get('realmToken') }))
+    const res = await a.fetch(new Request('http://x/who', { headers: { Authorization: `Bearer ${KEY()}` } }))
+    expect(res.status).toBe(200)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('a second request is its own: it is authenticated again', async () => {
+    process.env['AUTH_EXCHANGE_CACHE'] = 'off'
+    await get(KEY()); await get(KEY())
+    expect(calls).toHaveLength(2)
+  })
+})
+
 describe('remembered by the hash of the token', () => {
   it('once per token across many requests', async () => {
     for (let i = 0; i < 12; i++) expect((await get(KEY())).status).toBe(200)

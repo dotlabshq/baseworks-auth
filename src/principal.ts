@@ -183,6 +183,22 @@ export function mayRead(p: Principal): boolean {
   return !p.access || p.access.includes('read')
 }
 
+/**
+ * What a remembered authorization answer belongs to: the credential, not the
+ * person. A session and a read-only token of the same person, or an agent of
+ * theirs, are decided differently and must never share an answer.
+ *
+ * Every field that can change a decision is in it: kind, id, via, credential id,
+ * organization binding, the access list (sorted; absent and empty differ), role
+ * and whom it acts for. JSON, so no field can run into the next.
+ */
+export function credentialKey(p: Principal): string {
+  return JSON.stringify([
+    p.kind, p.id, p.via, p.credential_id ?? null, p.org_id ?? null,
+    p.access ? [...p.access].sort() : null, p.role ?? null, p.on_behalf_of ?? null,
+  ])
+}
+
 /** Where a request came through. `app` is the product or tool, when it said. */
 export interface ClientInfo {
   surface: 'ui' | 'api' | 'cli' | 'mcp'
