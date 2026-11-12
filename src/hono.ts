@@ -6,15 +6,21 @@ import {
 } from './principal.js'
 
 export interface ServiceAuthUser {
-  userId:    string
-  orgId?:    string
-  role?:     string
-  email?:    string
+  user_id:    string
+  org_id?:    string
+  role?:      string
+  email?:     string
   /**
    * The older reading of who is calling. `assistant` is an agent, `machine` an
    * organization key; neither is a person at a keyboard. New code reads
    * `principal`.
    */
+  token_type: 'user' | 'service' | 'assistant' | 'machine'
+  /** @deprecated Read `user_id`. Goes when the last service has moved to snake_case. */
+  userId:    string
+  /** @deprecated Read `org_id`. Goes when the last service has moved to snake_case. */
+  orgId?:    string
+  /** @deprecated Read `token_type`. Goes when the last service has moved to snake_case. */
   tokenType: 'user' | 'service' | 'assistant' | 'machine'
   /** Who is acting, as every service says it (workspace ADR 0004). */
   principal: Principal
@@ -26,6 +32,8 @@ declare module 'hono' {
     /** Who is acting. Set by `requireAuth`, the same object as `auth.principal`. */
     principal: Principal
     /** One id for this request across the services it reaches (`X-Request-Id`, or minted here). */
+    request_id: string
+    /** @deprecated Read `request_id`. Goes when the last service has moved to snake_case. */
     requestId: string
     /** The surface the request came through (`X-Baseworks-Client`). */
     client: ClientInfo
@@ -34,6 +42,8 @@ declare module 'hono' {
      * when it was a JWT, or what auth-service exchanged an API token (`bwt_…`)
      * for. Forward this to other services, never the API token.
      */
+    realm_token: string
+    /** @deprecated Read `realm_token`. Goes when the last service has moved to snake_case. */
     realmToken: string
   }
 }
@@ -58,10 +68,10 @@ function fromEnv(env: NodeJS.ProcessEnv): Verifier | { error: string } {
     return { error: 'neither AUTH_JWKS_URI nor JWT_SECRET is configured' }
   }
   return verifier({
-    ...(jwksUri ? { jwksUri } : {}),
+    ...(jwksUri ? { jwks_uri: jwksUri } : {}),
     ...(env['AUTH_ISSUER'] ? { issuer: env['AUTH_ISSUER'] } : {}),
     ...(env['AUTH_AUDIENCE'] ? { audience: env['AUTH_AUDIENCE'] } : {}),
-    ...(legacy ? { legacyHs256Secret: legacy } : {}),
+    ...(legacy ? { legacy_hs256_secret: legacy } : {}),
   })
 }
 
@@ -76,18 +86,25 @@ export function resetAuthVerifier(): void {
 
 function claimsToUser(claims: IdentityClaims): ServiceAuthUser {
   const principal = principalOf(claims)
+  const user_id = String(claims.sub ?? '')
+  const org_id = claims['org_id'] as string | undefined
+  // Derived from the principal, so the two can never disagree. Only a
+  // service token opens a service's doors, and only a person is a `user`.
+  const token_type: ServiceAuthUser['token_type'] = principal.kind === 'service' ? 'service'
+    : principal.kind === 'human' ? 'user'
+    : principal.kind === 'machine' ? 'machine'
+    : 'assistant'
   return {
-    userId:    String(claims.sub ?? ''),
-    orgId:     claims['org_id'] as string | undefined,
+    user_id,
+    org_id,
     role:      claims['role'] as string | undefined,
     email:     claims['email'] as string | undefined,
-    // Derived from the principal, so the two can never disagree. Only a
-    // service token opens a service's doors, and only a person is a `user`.
-    tokenType: principal.kind === 'service' ? 'service'
-      : principal.kind === 'human' ? 'user'
-      : principal.kind === 'machine' ? 'machine'
-      : 'assistant',
+    token_type,
     principal,
+    // Deprecated spellings, same values, until the last service has moved.
+    userId: user_id,
+    orgId: org_id,
+    tokenType: token_type,
   }
 }
 
@@ -181,7 +198,7 @@ const requestIdOf = (header: string | undefined): string =>
  *     await customers.emit(id, 0, 'CustomerCreated', payload, auditOf(c, { org_id }))
  */
 export function auditOf(c: Context, ctx: Pick<AuditContext, 'org_id'> = {}) {
-  return emitAs(c.get('principal'), { ...ctx, client: c.get('client'), request_id: c.get('requestId') })
+  return emitAs(c.get('principal'), { ...ctx, client: c.get('client'), request_id: c.get('request_id') })
 }
 
 /**
@@ -197,7 +214,7 @@ export async function requireAuth(c: Context, next: Next) {
   // Authenticated already by an earlier `requireAuth` on this request (routers
   // mounted on one path each register it): once is enough, and with the exchange
   // memory off a second run would be a second exchange.
-  if (c.get('realmToken')) return next()
+  if (c.get('realm_token')) return next()
 
   const header = c.req.header('Authorization')
   if (!header?.startsWith('Bearer ')) return c.json({ error: 'Unauthorized' }, 401)
@@ -227,8 +244,11 @@ export async function requireAuth(c: Context, next: Next) {
   const auth = claimsToUser(claims)
   c.set('auth', auth)
   c.set('principal', auth.principal)
-  c.set('realmToken', bearer)
-  c.set('requestId', requestIdOf(c.req.header('X-Request-Id')))
+  const request_id = requestIdOf(c.req.header('X-Request-Id'))
+  c.set('realm_token', bearer)
+  c.set('realmToken', bearer) // @deprecated
+  c.set('request_id', request_id)
+  c.set('requestId', request_id) // @deprecated
   c.set('client', clientOf(c.req.header('X-Baseworks-Client')))
   return next()
 }

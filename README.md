@@ -17,7 +17,7 @@ behaviour and no export: what moved is the service (pages at its root, the API
 under `/api`; published at `/auth` and `/v1/auth`), and the addresses this
 package is handed follow from that:
 
-- `serviceToken({ authUrl })` — through a gateway, `https://<host>/v1/auth` as
+- `serviceToken({ auth_url })` — through a gateway, `https://<host>/v1/auth` as
   before; calling auth-service directly, `http://<auth>/api` (was the bare
   origin).
 - `addAuthCommands({ authBase })` — the origin the realm is published on, as
@@ -42,7 +42,7 @@ import { requireAuth } from '@baseworks/auth/hono'
 
 app.use('*', requireAuth)
 app.get('/things', (c) => {
-  const { userId, tokenType } = c.get('auth')
+  const { user_id, token_type } = c.get('auth')
   …
 })
 ```
@@ -116,10 +116,10 @@ const key = await loadSigningKey(process.env.AUTH_SIGNING_KEY!)
 
 app.get('/.well-known/jwks.json', (c) => c.json(jwks(key)))
 
-const token = await mint(key, { sub: userId, type: 'human' }, {
+const token = await mint(key, { sub: user_id, type: 'human' }, {
   issuer: 'https://auth.example.com',
   audience: 'example-realm',
-  expiresInSeconds: 86400,
+  expires_in_seconds: 86400,
 })
 ```
 
@@ -285,7 +285,7 @@ import { requireAuth } from '@baseworks/auth/hono'
 
 app.use('*', requireAuth)
 app.get('/me', (c) => {
-  const { userId, orgId } = c.var.auth
+  const { user_id, org_id } = c.var.auth
 })
 ```
 
@@ -447,7 +447,7 @@ await customers.emit(id, 0, 'CustomerCreated', payload, auditOf(c, { org_id }))
 Tokens minted before this say only `type`. They are read as what they were:
 `human` (and any type this package does not know) is a person who signed in,
 `service` is a service, and `assistant` is an agent for its person, so it is
-no longer mistaken for a session. `auth.tokenType` is kept and now derived
+no longer mistaken for a session. `auth.token_type` is kept and now derived
 from the principal; it gains `machine`. Nothing mints the new claims yet:
 auth-service and iam follow.
 
@@ -480,7 +480,7 @@ minutes, and verifies that exactly like any other bearer. Afterwards:
 
 ```ts
 c.get('principal')    // the agent, the machine or the person the API token stands for
-c.get('realmToken')   // the JWT the request was authenticated with: forward THIS, never the bwt_
+c.get('realm_token')  // the JWT the request was authenticated with: forward THIS, never the bwt_
 ```
 
 - Without `AUTH_URL` an API token is a 401: it cannot be accepted here.
@@ -504,3 +504,21 @@ id: a session and a read-only token of the same person, or an agent of theirs,
 are decided differently, and an answer given to one must never be served to
 another. `requireAuth` also runs once per request however many routers register
 it.
+
+## snake_case names (2.3.0)
+
+Data field names are snake_case in code as well as on the wire (workspace ADR
+0003). From 2.3.0:
+
+| Now | Deprecated spelling (same value, still set) |
+|---|---|
+| `auth.user_id`, `auth.org_id`, `auth.token_type` | `auth.userId`, `auth.orgId`, `auth.tokenType` |
+| `c.get('request_id')` | `c.get('requestId')` |
+| `c.get('realm_token')` | `c.get('realmToken')` |
+| `mint(…, { expires_in_seconds })` | `expiresInSeconds` |
+| `verifier({ jwks_uri, legacy_hs256_secret })` | `jwksUri`, `legacyHs256Secret` |
+| `serviceToken({ auth_url, client_id, client_secret, expires_in, renew_before })` | `authUrl`, `clientId`, `clientSecret`, `expiresIn`, `renewBefore` |
+
+The deprecated names are accepted and set so that a service that has not moved
+keeps working unchanged. They go when the last service has moved. Not renamed:
+the CLI helpers (`cli`, `cli-auth`, `pkce`, `oidc`), which belong to the apps.

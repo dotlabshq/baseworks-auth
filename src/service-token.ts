@@ -8,13 +8,13 @@
  * twice at once.
  *
  *   const token = serviceToken({
- *     authUrl: env.AUTH_URL,              // auth-service's API, see below
- *     clientId: 'flect-api',
- *     clientSecret: env.AUTH_CLIENT_SECRET, // from Vault, never in the job file
+ *     auth_url: env.AUTH_URL,              // auth-service's API, see below
+ *     client_id: 'flect-api',
+ *     client_secret: env.AUTH_CLIENT_SECRET, // from Vault, never in the job file
  *   })
  *   await fetch(iamUrl, { headers: { Authorization: `Bearer ${await token()}` } })
  *
- * `authUrl` is where auth-service's API is reached, and `/service-token` is
+ * `auth_url` is where auth-service's API is reached, and `/service-token` is
  * appended to it. Through a gateway that is `https://<host>/v1/auth`. Calling
  * auth-service directly, inside a cluster or on a laptop, it is the service's
  * own API mount: `http://auth:3000/api` from auth-service 2.0 on, where the
@@ -27,12 +27,22 @@
 
 export interface ServiceTokenOptions {
   /** auth-service origin, e.g. http://auth-service.service.consul:3000. */
-  authUrl: string
-  clientId: string
-  clientSecret: string
+  auth_url?: string
+  client_id?: string
+  client_secret?: string
   /** Lifetime to ask for, in seconds. auth-service caps it (3600). */
-  expiresIn?: number
+  expires_in?: number
   /** Renew this many seconds before expiry. Default 60. */
+  renew_before?: number
+  /** @deprecated Read `auth_url`. Accepted until the last service has moved. */
+  authUrl?: string
+  /** @deprecated Read `client_id`. Accepted until the last service has moved. */
+  clientId?: string
+  /** @deprecated Read `client_secret`. Accepted until the last service has moved. */
+  clientSecret?: string
+  /** @deprecated Read `expires_in`. Accepted until the last service has moved. */
+  expiresIn?: number
+  /** @deprecated Read `renew_before`. Accepted until the last service has moved. */
   renewBefore?: number
   fetch?: typeof fetch
   now?: () => number
@@ -51,8 +61,13 @@ export class ServiceTokenError extends Error {
 export function serviceToken(opts: ServiceTokenOptions): ServiceTokenSource {
   const doFetch = opts.fetch ?? fetch
   const now = opts.now ?? Date.now
-  const renewBeforeMs = (opts.renewBefore ?? 60) * 1000
-  const url = `${opts.authUrl.replace(/\/+$/, '')}/service-token`
+  const authUrl = opts.auth_url ?? opts.authUrl
+  const clientId = opts.client_id ?? opts.clientId
+  const clientSecret = opts.client_secret ?? opts.clientSecret
+  const expiresIn = opts.expires_in ?? opts.expiresIn
+  if (!authUrl || !clientId || !clientSecret) throw new Error('serviceToken needs auth_url, client_id and client_secret')
+  const renewBeforeMs = (opts.renew_before ?? opts.renewBefore ?? 60) * 1000
+  const url = `${authUrl.replace(/\/+$/, '')}/service-token`
 
   let current: { token: string; renewAt: number } | undefined
   let pending: Promise<string> | undefined
@@ -62,15 +77,15 @@ export function serviceToken(opts: ServiceTokenOptions): ServiceTokenSource {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_id: opts.clientId,
-        client_secret: opts.clientSecret,
-        ...(opts.expiresIn ? { expires_in: opts.expiresIn } : {}),
+        client_id: clientId,
+        client_secret: clientSecret,
+        ...(expiresIn ? { expires_in: expiresIn } : {}),
       }),
     })
     if (!res.ok) {
       // The body is auth-service's error code; it never echoes the secret.
       const body = (await res.json().catch(() => ({}))) as { error?: string }
-      throw new ServiceTokenError(res.status, `service token for ${opts.clientId}: ${body.error ?? res.statusText}`)
+      throw new ServiceTokenError(res.status, `service token for ${clientId}: ${body.error ?? res.statusText}`)
     }
     const { token, expires_in } = (await res.json()) as { token: string; expires_in: number }
     current = { token, renewAt: now() + Math.max(0, expires_in * 1000 - renewBeforeMs) }

@@ -131,7 +131,9 @@ export function jwks(signing: SigningKey, retired: JWK[] = []): JSONWebKeySet {
 export interface MintOptions {
   issuer: string
   audience: string
-  expiresInSeconds: number
+  expires_in_seconds?: number
+  /** @deprecated Read `expires_in_seconds`. Accepted until the last service has moved. */
+  expiresInSeconds?: number
 }
 
 export async function mint(
@@ -140,6 +142,8 @@ export async function mint(
   opts: MintOptions,
 ): Promise<string> {
   const { sub, type, ...rest } = claims
+  const seconds = opts.expires_in_seconds ?? opts.expiresInSeconds
+  if (seconds === undefined) throw new Error('mint needs expires_in_seconds')
   return new SignJWT({ type, ...rest })
     .setProtectedHeader({ alg: IDENTITY_ALG, kid: key.kid })
     .setSubject(sub)
@@ -149,7 +153,7 @@ export async function mint(
     // A unique id per token is what makes a future revocation list possible;
     // without it a leaked token cannot be named, only waited out.
     .setJti(crypto.randomUUID())
-    .setExpirationTime(`${opts.expiresInSeconds}s`)
+    .setExpirationTime(`${seconds}s`)
     .sign(key.privateKey)
 }
 
@@ -157,6 +161,8 @@ export async function mint(
 
 export interface VerifierOptions {
   /** Where to fetch the realm's public keys. jose caches and refetches on an unknown `kid`. */
+  jwks_uri?: string
+  /** @deprecated Read `jwks_uri`. Accepted until the last service has moved. */
   jwksUri?: string
   /** A fixed key set instead of a URL — for tests, or a service that ships with the realm. */
   jwks?: JSONWebKeySet
@@ -169,6 +175,8 @@ export interface VerifierOptions {
    * tokens for this realm — including tokens impersonating a user — so it must
    * be removed once every issuer has moved to ES256.
    */
+  legacy_hs256_secret?: string
+  /** @deprecated Read `legacy_hs256_secret`. Accepted until the last service has moved. */
   legacyHs256Secret?: string
 }
 
@@ -184,18 +192,20 @@ export interface Verifier {
  * worth acting on (an unreachable JWKS, say) surface through `onError`.
  */
 export function verifier(opts: VerifierOptions & { onError?: (err: unknown) => void }): Verifier {
-  if (!opts.jwksUri && !opts.jwks && !opts.legacyHs256Secret) {
-    throw new Error('verifier needs jwksUri, jwks, or legacyHs256Secret')
+  const jwksUri = opts.jwks_uri ?? opts.jwksUri
+  const legacySecret = opts.legacy_hs256_secret ?? opts.legacyHs256Secret
+  if (!jwksUri && !opts.jwks && !legacySecret) {
+    throw new Error('verifier needs jwks_uri, jwks, or legacy_hs256_secret')
   }
 
   const keys = opts.jwks
     ? createLocalJWKSet(opts.jwks)
-    : opts.jwksUri
-      ? createRemoteJWKSet(new URL(opts.jwksUri))
+    : jwksUri
+      ? createRemoteJWKSet(new URL(jwksUri))
       : undefined
 
-  const legacy = opts.legacyHs256Secret
-    ? new TextEncoder().encode(opts.legacyHs256Secret)
+  const legacy = legacySecret
+    ? new TextEncoder().encode(legacySecret)
     : undefined
 
   // A token with no expiry is a token forever; one with no subject or type
