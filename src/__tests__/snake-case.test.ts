@@ -136,3 +136,20 @@ describe('option objects', () => {
     expect(() => serviceToken({ auth_url: 'http://auth' })).toThrow(/client_id/)
   })
 })
+
+describe('serviceAudit', () => {
+  it('a service acts as itself: actor service:<name>, the whole envelope', async () => {
+    const { serviceAudit, servicePrincipal, principalOf } = await import('../principal.js')
+    expect(serviceAudit('iam-service')).toEqual({
+      actor: 'service:iam-service',
+      metadata: { audit: { kind: 'service', actor: 'service:iam-service', actor_id: 'iam-service', via: 'client' } },
+    })
+    expect(serviceAudit('x', { org_id: 'o1', request_id: 'r1' })).toEqual({
+      actor: 'service:x',
+      metadata: { audit: { kind: 'service', actor: 'service:x', actor_id: 'x', via: 'client', org_id: 'o1', request_id: 'r1' } },
+      correlationId: 'r1',
+    })
+    // The same principal a verified service token reads as.
+    expect(servicePrincipal('svc')).toEqual(principalOf({ sub: 'svc', type: 'service' }))
+  })
+})

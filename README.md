@@ -507,6 +507,8 @@ it.
 
 ## snake_case names (2.3.0)
 
+`serviceAudit(name)` and `servicePrincipal(name)` (from `@baseworks/auth/principal`) give an event with no request behind it the actor `service:<name>`.
+
 Data field names are snake_case in code as well as on the wire (workspace ADR
 0003). From 2.3.0:
 

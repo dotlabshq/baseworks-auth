@@ -267,3 +267,21 @@ export function emitAs(p: Principal, ctx: AuditContext = {}): {
     ...(ctx.request_id ? { correlationId: ctx.request_id } : {}),
   }
 }
+
+/** What `emitAs` and `auditOf` give an event append: `actor`, `metadata.audit`, `correlationId`. */
+export type EmitAudit = ReturnType<typeof emitAs>
+
+/** A realm service acting as itself: `service:<name>`, via `client`. */
+export function servicePrincipal(name: string): Principal {
+  return { kind: 'service', id: name, actor: actorFor('service', name), via: 'client' }
+}
+
+/**
+ * For an event with no request behind it (boot, a background job, a throttled
+ * stamp): the service itself is the actor, `service:<name>`.
+ *
+ *     await tokens.emit(id, v, 'TokenUsed', { at }, serviceAudit('iam-service'))
+ */
+export function serviceAudit(name: string, ctx: AuditContext = {}): EmitAudit {
+  return emitAs(servicePrincipal(name), ctx)
+}
