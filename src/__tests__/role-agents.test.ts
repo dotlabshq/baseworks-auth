@@ -11,11 +11,11 @@ describe('act and sid (acting as a role agent)', () => {
     const p = principalOf(role)
     expect(p.id).toBe('ag_software')
     expect(p.actor).toBe('agent:software@basri')
-    expect(p.act).toEqual({ actor: 'agent:claude-code@basri' })
+    expect(p.act).toEqual({ sub: 'ag_conn', actor: 'agent:claude-code@basri' })
     expect(p.session_id).toBe('sess-1')
     const e = emitAs(p)
     expect(e.actor).toBe('agent:software@basri')
-    expect(e.metadata.audit).toMatchObject({ actor: 'agent:software@basri', credential_id: 'g1', act: 'agent:claude-code@basri', session_id: 'sess-1', on_behalf_of: 'user:u1' })
+    expect(e.metadata.audit).toMatchObject({ actor: 'agent:software@basri', credential_id: 'g1', act: 'agent:claude-code@basri', act_id: 'ag_conn', session_id: 'sess-1', on_behalf_of: 'user:u1' })
   })
 
   it('a principal without act or sid is exactly what it was', () => {
@@ -29,8 +29,8 @@ describe('act and sid (acting as a role agent)', () => {
   })
 
   it.each([
-    ['not an object', 'agent:claude-code@basri'], ['an array', [{ actor: 'agent:x@y' }]], ['no actor', { sub: 'x' }],
-    ['a person actor', { actor: 'user:u1' }], ['a service actor', { actor: 'service:mcp' }], ['a forged shape', { actor: 'agent:x@y z' }], ['null', null],
+    ['not an object', 'agent:claude-code@basri'], ['an array', [{ actor: 'agent:x@y' }]], ['no actor', { sub: 'x' }], ['no sub', { actor: 'agent:x@y' }], ['empty sub', { sub: '', actor: 'agent:x@y' }], ['numeric sub', { sub: 7, actor: 'agent:x@y' }],
+    ['a person actor', { sub: 'a', actor: 'user:u1' }], ['a service actor', { sub: 'a', actor: 'service:mcp' }], ['a forged shape', { sub: 'a', actor: 'agent:x@y z' }], ['null', null],
   ])('act that is %s is no act', (_n, act) => {
     expect(principalOf({ ...role, act }).act).toBeUndefined()
   })
@@ -61,6 +61,13 @@ describe('act and sid (acting as a role agent)', () => {
     expect(credentialKey(principalOf({ ...role, sid: 'sess-2' }))).toBe(credentialKey(software))
   })
 
+  it('credentialKey uses the connection id, so a handle change does not change it', () => {
+    const renamed = principalOf({ ...role, act: { sub: 'ag_conn', actor: 'agent:claude-code@basri2' } })
+    expect(credentialKey(renamed)).toBe(credentialKey(principalOf(role)))
+    expect(credentialKey(principalOf(role))).toContain('ag_conn')
+    expect(credentialKey(principalOf(role))).not.toContain('claude-code')
+  })
+
   it('credentialKey of a principal without act is unchanged (eight elements)', () => {
     const p = principalOf({ sub: 'u1', kind: 'human', via: 'token', credential_id: 't1', access: ['read'] })
     expect(JSON.parse(credentialKey(p))).toHaveLength(8)
@@ -73,6 +80,6 @@ describe('auditOf', () => {
     const vars: Record<string, unknown> = { principal: principalOf(role), client: { surface: 'mcp' }, request_id: 'req-12345678' }
     const e = auditOf({ get: (k: string) => vars[k] } as never, { org_id: 'o1' })
     expect(e.actor).toBe('agent:software@basri')
-    expect(e.metadata.audit).toMatchObject({ act: 'agent:claude-code@basri', session_id: 'sess-1', credential_id: 'g1', org_id: 'o1', client: 'mcp' })
+    expect(e.metadata.audit).toMatchObject({ act: 'agent:claude-code@basri', act_id: 'ag_conn', session_id: 'sess-1', credential_id: 'g1', org_id: 'o1', client: 'mcp' })
   })
 })

@@ -49,11 +49,11 @@ export interface Principal {
   credential_id?: string
   /**
    * Set when the call acts as a role agent (`agent:software@basri`) through a connection of the same
-   * person (RFC 8693 `act`): `actor` is the connection's own actor (`agent:claude-code@basri`). The
+   * person (RFC 8693 `act`): `sub` is the connection agent's id (stable) and `actor` its actor (`agent:claude-code@basri`; the handle in it can change). The
    * principal itself is the role agent. Acting as adds no authority: the person's standing, cut by
    * `access` and the agent's standing, decides.
    */
-  act?: { actor: string }
+  act?: { sub: string; actor: string }
   /** The MCP session (a client window) the call belongs to, from the `sid` claim: visible ASCII, at most 64 characters. */
   session_id?: string
 }
@@ -99,11 +99,12 @@ function actorClaim(claims: Record<string, unknown>, kind: PrincipalKind): strin
   return actor && kind !== 'human' && ACTOR_RE.test(actor) && actor.startsWith(`${kind}:`) ? actor : undefined
 }
 
-/** `act` is believed only as `{ actor }` naming one agent actor; anything else is no `act`. */
-function actOf(v: unknown): { actor: string } | undefined {
+/** `act` is believed only as `{ sub, actor }`: a non-empty `sub` and one agent actor. Anything else is no `act`. */
+function actOf(v: unknown): { sub: string; actor: string } | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
-  const actor = text((v as Record<string, unknown>)['actor'])
-  return actor && actor.startsWith('agent:') && ACTOR_RE.test(actor) ? { actor } : undefined
+  const o = v as Record<string, unknown>
+  const sub = text(o['sub']), actor = text(o['actor'])
+  return sub && actor && actor.startsWith('agent:') && ACTOR_RE.test(actor) ? { sub, actor } : undefined
 }
 
 const SESSION_RE = /^[\x21-\x7e]{1,64}$/
@@ -216,7 +217,7 @@ export function mayRead(p: Principal): boolean {
  * organization binding, the access list (sorted; absent and empty differ), role
  * and whom it acts for. JSON, so no field can run into the next.
  *
- * A role agent (`act` present) adds the connection it acts through as a ninth element, so one
+ * A role agent (`act` present) adds the connection's id (`act.sub`, not the actor string: a handle can change) as a ninth element, so one
  * connection's answer for `software` is never served to `platform`, and the key of every principal
  * without `act` is exactly what it was. The session is not part of it: it decides nothing.
  */
@@ -224,7 +225,7 @@ export function credentialKey(p: Principal): string {
   return JSON.stringify([
     p.kind, p.id, p.via, p.credential_id ?? null, p.org_id ?? null,
     p.access ? [...p.access].sort() : null, p.role ?? null, p.on_behalf_of ?? null,
-    ...(p.act ? [p.act.actor] : []),
+    ...(p.act ? [p.act.sub] : []),
   ])
 }
 
@@ -252,6 +253,8 @@ export interface AuditEnvelope {
   credential_id?: string
   /** A role agent's connection: its actor, `agent:claude-code@basri`. */
   act?: string
+  /** The connection agent's id (`act.sub`). */
+  act_id?: string
   /** The MCP session the call belongs to. */
   session_id?: string
   client?: string
@@ -276,7 +279,7 @@ export function auditEnvelope(p: Principal, ctx: AuditContext = {}): AuditEnvelo
     via: p.via,
     ...(p.on_behalf_of ? { on_behalf_of: p.on_behalf_of } : {}),
     ...(p.credential_id ? { credential_id: p.credential_id } : {}),
-    ...(p.act ? { act: p.act.actor } : {}),
+    ...(p.act ? { act: p.act.actor, act_id: p.act.sub } : {}),
     ...(p.session_id ? { session_id: p.session_id } : {}),
     ...(client ? { client } : {}),
     ...(org_id ? { org_id } : {}),
