@@ -429,13 +429,16 @@ p.kind          // 'human' | 'agent' | 'machine' | 'service'
 p.actor         // 'user:<id>' | 'agent:dev@basri' | 'machine:ci@acme' | 'service:billing'
 p.via           // 'session' | 'token' | 'key' | 'oauth' | 'client'
 p.on_behalf_of  // for an agent: 'user:<id>' of the person it works for
+p.act           // 2.4: set when it acts as a role agent: { actor: 'agent:claude-code@basri' }, the connection
+p.session_id    // 2.4: the MCP session (a client window) the call belongs to
 isSession(p)    // true only for a person who signed in
 ```
 
 An event is appended with `auditOf(c, { org_id })`: the actor, the request id
 as the correlation id, and `metadata.audit` with the same fields in every
 service (`kind`, `actor`, `actor_id`, `via`, `on_behalf_of`, `credential_id`,
-`client`, `org_id`, `request_id`). A service does not write an actor by hand.
+`client`, `org_id`, `request_id`, and from 2.4 `act` and `session_id` when there are any). A
+service does not write an actor by hand.
 
 ```ts
 await customers.emit(id, 0, 'CustomerCreated', payload, auditOf(c, { org_id }))
@@ -524,3 +527,32 @@ Data field names are snake_case in code as well as on the wire (workspace ADR
 The deprecated names are accepted and set so that a service that has not moved
 keeps working unchanged. They go when the last service has moved. Not renamed:
 the CLI helpers (`cli`, `cli-auth`, `pkce`, `oidc`), which belong to the apps.
+
+## Acting as a role agent, and sessions (2.4.0)
+
+One OAuth connection (Claude Code) can act as any of its person's agents
+(`software@basri`). The realm token then names the **role agent** as the
+principal and the connection under RFC 8693's `act`:
+
+```
+sub, actor      the role agent (agent:software@basri)
+act             { sub: <connection agent id>, actor: "agent:claude-code@basri" }
+sid             the MCP session id, when the exchange was given one
+```
+
+- `Principal.act?: { actor: string }` and `Principal.session_id?: string`, read
+  by `principalOf` from `act` and `sid`. `act` is believed only as an object
+  whose `actor` is one `agent:` actor; `sid` only as 1 to 64 visible ASCII
+  characters. Anything else reads as absent. Only an agent principal has
+  either: on a person, machine or service token they are ignored.
+- `auditOf` / `emitAs` write `metadata.audit.act` (the connection's actor
+  string) and `metadata.audit.session_id`. Absent on every other event.
+- **`credentialKey` includes the connection a role agent acts through**, so a
+  permission answer cached for `software` is never served to `platform`, nor to
+  the connection itself. A principal without `act` has exactly the key it had.
+  The session is not in the key: it decides nothing.
+- Acting as adds no authority: what a call may do is the person's standing cut
+  by `access` and the agent's standing in the organization. Nothing here
+  changes `mayRead`, `mayWrite` or `personOf`.
+
+Additive: no existing name changed.

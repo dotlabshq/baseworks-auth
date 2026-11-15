@@ -47,6 +47,15 @@ export interface Principal {
   role?: string
   /** The API token or key behind this token: its id, never the secret. */
   credential_id?: string
+  /**
+   * Set when the call acts as a role agent (`agent:software@basri`) through a connection of the same
+   * person (RFC 8693 `act`): `actor` is the connection's own actor (`agent:claude-code@basri`). The
+   * principal itself is the role agent. Acting as adds no authority: the person's standing, cut by
+   * `access` and the agent's standing, decides.
+   */
+  act?: { actor: string }
+  /** The MCP session (a client window) the call belongs to, from the `sid` claim: visible ASCII, at most 64 characters. */
+  session_id?: string
 }
 
 const KINDS: readonly PrincipalKind[] = ['human', 'agent', 'machine', 'service']
@@ -89,6 +98,17 @@ function actorClaim(claims: Record<string, unknown>, kind: PrincipalKind): strin
   const actor = text(claims['actor'])
   return actor && kind !== 'human' && ACTOR_RE.test(actor) && actor.startsWith(`${kind}:`) ? actor : undefined
 }
+
+/** `act` is believed only as `{ actor }` naming one agent actor; anything else is no `act`. */
+function actOf(v: unknown): { actor: string } | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const actor = text((v as Record<string, unknown>)['actor'])
+  return actor && actor.startsWith('agent:') && ACTOR_RE.test(actor) ? { actor } : undefined
+}
+
+const SESSION_RE = /^[\x21-\x7e]{1,64}$/
+/** `sid` is believed only as visible ASCII of 1 to 64 characters. */
+const sessionOf = (v: unknown): string | undefined => (typeof v === 'string' && SESSION_RE.test(v) ? v : undefined)
 
 /**
  * Read the principal from verified claims.
@@ -152,12 +172,16 @@ export function principalOf(claims: Record<string, unknown>): Principal {
   const given = claimed && BEHALF_RE.test(claimed) ? claimed : undefined
   const legacy = named ? undefined : BEHALF_RE.test(`user:${sub}`) ? `user:${sub}` : undefined
   const on_behalf_of = given ?? legacy
+  const act = actOf(claims['act'])
+  const session_id = sessionOf(claims['sid'])
   return {
     kind: 'agent', id: sub,
     actor: actorClaim(claims, 'agent') ?? actorFor('agent', named ? sub : 'assistant', on_behalf_of?.replace(/^user:/, '')),
     via: givenVia === 'oauth' ? 'oauth' : 'token',
     ...(on_behalf_of ? { on_behalf_of } : {}),
     ...narrowing,
+    ...(act ? { act } : {}),
+    ...(session_id ? { session_id } : {}),
   }
 }
 
@@ -191,11 +215,16 @@ export function mayRead(p: Principal): boolean {
  * Every field that can change a decision is in it: kind, id, via, credential id,
  * organization binding, the access list (sorted; absent and empty differ), role
  * and whom it acts for. JSON, so no field can run into the next.
+ *
+ * A role agent (`act` present) adds the connection it acts through as a ninth element, so one
+ * connection's answer for `software` is never served to `platform`, and the key of every principal
+ * without `act` is exactly what it was. The session is not part of it: it decides nothing.
  */
 export function credentialKey(p: Principal): string {
   return JSON.stringify([
     p.kind, p.id, p.via, p.credential_id ?? null, p.org_id ?? null,
     p.access ? [...p.access].sort() : null, p.role ?? null, p.on_behalf_of ?? null,
+    ...(p.act ? [p.act.actor] : []),
   ])
 }
 
@@ -221,6 +250,10 @@ export interface AuditEnvelope {
   via: Via
   on_behalf_of?: string
   credential_id?: string
+  /** A role agent's connection: its actor, `agent:claude-code@basri`. */
+  act?: string
+  /** The MCP session the call belongs to. */
+  session_id?: string
   client?: string
   org_id?: string
   request_id?: string
@@ -243,6 +276,8 @@ export function auditEnvelope(p: Principal, ctx: AuditContext = {}): AuditEnvelo
     via: p.via,
     ...(p.on_behalf_of ? { on_behalf_of: p.on_behalf_of } : {}),
     ...(p.credential_id ? { credential_id: p.credential_id } : {}),
+    ...(p.act ? { act: p.act.actor } : {}),
+    ...(p.session_id ? { session_id: p.session_id } : {}),
     ...(client ? { client } : {}),
     ...(org_id ? { org_id } : {}),
     ...(ctx.request_id ? { request_id: ctx.request_id } : {}),
