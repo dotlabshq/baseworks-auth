@@ -556,3 +556,19 @@ sid             the MCP session id, when the exchange was given one
   changes `mayRead`, `mayWrite` or `personOf`.
 
 Additive: no existing name changed.
+
+### An agent principal is never rewritten as a person (realm rule, round 0.12)
+
+An OAuth call always arrives as a named agent of the person (`kind: agent`, `via: oauth`, `act` set to the connection). Code that
+gets one must not read it as the person it works for:
+
+- Do not turn `principal.on_behalf_of` into `principal.id`, a `user:` actor or a session. `isSession(p)` is true only for a person
+  who signed in; an agent is never one, and the things that need a session (creating tokens or agents, removing an account,
+  accepting an invitation, locking a field) stay refused for it.
+- A person acts as themself only with their own session.
+- An agent's authority in an organization is not the person's role copied over: it is the person's role cut by the connection's
+  `access` and by the agent's standing in that organization, which org-service answers. A product that grants roles only to people
+  asks org-service about the agent instead of mapping it to its owner.
+- `personOf(p)` is the person whose standing bounds the agent, for asking org-service; it is not an identity to act as.
+
+No code change in 2.4.0 for this: `principalOf`, `isSession` and `credentialKey` already behave this way.
